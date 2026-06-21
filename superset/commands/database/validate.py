@@ -36,7 +36,8 @@ from superset.models.core import Database
 from superset.utils import json
 from superset.utils.ssh_tunnel import unmask_password_info
 
-BYPASS_VALIDATION_ENGINES = {"bigquery", "datastore", "snowflake"}
+BYPASS_VALIDATION_ENGINES = {"datastore", "snowflake"}
+BYPASS_CONNECTION_TEST_ENGINES = {"bigquery"}
 
 
 class ValidateDatabaseParametersCommand(BaseCommand):
@@ -89,6 +90,10 @@ class ValidateDatabaseParametersCommand(BaseCommand):
         if errors:
             event_logger.log_with_context(action="validation_error", engine=engine)
             raise InvalidParametersError(errors)
+
+        if engine in BYPASS_CONNECTION_TEST_ENGINES:
+            # Skip engines that only validate params
+            return
 
         serialized_encrypted_extra = self._properties.get(
             "masked_encrypted_extra",
@@ -143,7 +148,7 @@ class ValidateDatabaseParametersCommand(BaseCommand):
                 # query.
                 if (
                     database.is_oauth2_enabled()
-                    and database.db_engine_spec.needs_oauth2(ex)
+                    and database.db_engine_spec.needs_oauth2(ex, database)
                 ):
                     return
 

@@ -195,7 +195,7 @@ class GSheetsEngineSpec(ShillelaghEngineSpec):
         return urljoin(uri, "?" + urlencode(params))
 
     @classmethod
-    def needs_oauth2(cls, ex: Exception) -> bool:
+    def needs_oauth2(cls, ex: Exception, database: Database) -> bool:
         """
         Check if the exception is one that indicates OAuth2 is needed.
 

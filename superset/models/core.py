@@ -1436,7 +1436,7 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
         If OAuth2 is enabled and the exception indicates that OAuth2 is needed,
         starts the OAuth2 dance.
         """
-        if self.is_oauth2_enabled() and self.db_engine_spec.needs_oauth2(ex):
+        if self.is_oauth2_enabled() and self.db_engine_spec.needs_oauth2(ex, self):
             self.start_oauth2_dance()
 
     def purge_oauth2_tokens(self) -> None:

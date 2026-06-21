@@ -315,6 +315,6 @@ def check_for_oauth2(database: Database) -> Iterator[None]:
     try:
         yield
     except Exception as ex:
-        if database.is_oauth2_enabled() and database.db_engine_spec.needs_oauth2(ex):
+        if database.is_oauth2_enabled() and database.db_engine_spec.needs_oauth2(ex, database):
             database.db_engine_spec.start_oauth2_dance(database)
         raise

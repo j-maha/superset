@@ -2219,12 +2219,12 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
         try:
             cursor.execute(query)
         except Exception as ex:
-            if database.is_oauth2_enabled() and cls.needs_oauth2(ex):
+            if database.is_oauth2_enabled() and cls.needs_oauth2(ex, database):
                 cls.start_oauth2_dance(database)
             raise cls.get_dbapi_mapped_exception(ex) from ex
 
     @classmethod
-    def needs_oauth2(cls, ex: Exception) -> bool:
+    def needs_oauth2(cls, ex: Exception, database: Database) -> bool:
         """
         Check if the exception is one that indicates OAuth2 is needed.
         """

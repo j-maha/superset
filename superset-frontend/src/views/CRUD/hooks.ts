@@ -23,6 +23,7 @@ import {
   makeApi,
   SupersetClient,
   JsonObject,
+  ErrorTypeEnum,
   getClientErrorObject,
 } from '@superset-ui/core';
 
@@ -770,23 +771,51 @@ export const getConnectionAlert = () => SupersetText.DB_CONNECTION_ALERTS;
 export const getDatabaseDocumentationLinks = () =>
   SupersetText.DB_CONNECTION_DOC_LINKS;
 
-export const testDatabaseConnection = (
+export const testDatabaseConnection = async (
   connection: Partial<DatabaseObject>,
   handleErrorMsg: (errorMsg: string) => void,
   addSuccessToast: (arg0: string) => void,
+  onOAuth2SaveNeeded: (errorMsg: string) => void,
 ) => {
-  SupersetClient.post({
-    endpoint: 'api/v1/database/test_connection/',
-    body: JSON.stringify(connection),
-    headers: { 'Content-Type': 'application/json' },
-  }).then(
-    () => {
-      addSuccessToast(t('Connection looks good!'));
-    },
-    createErrorHandler((errMsg: Record<string, string[] | string> | string) => {
-      handleErrorMsg(t('ERROR: %s', parsedErrorMessage(errMsg)));
-    }),
-  );
+  try {
+    await SupersetClient.post({
+      endpoint: 'api/v1/database/test_connection/',
+      body: JSON.stringify(connection),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    addSuccessToast(t('Connection looks good!'));
+  } catch (response) {
+    const { errors, message, error } =
+      await getClientErrorObject(response as Response | string);
+    const errorType = errors?.[0]?.error_type;
+
+    if (errorType === ErrorTypeEnum.OAUTH2_REQUIRES_SAVED_DATABASE) {
+      onOAuth2SaveNeeded(
+        t(
+          'This database requires OAuth2 authentication. Please save the database first, then test the connection.',
+        ),
+      );
+    } else if (errorType === ErrorTypeEnum.OAUTH2_REDIRECT) {
+      const authUrl = errors?.[0]?.extra?.url;
+      if (authUrl) {
+        window.open(authUrl, '_blank');
+        handleErrorMsg(
+          t(
+            'Authorization needed. Please authorize at the following URL and test the connection again: %s',
+            authUrl,
+          ),
+        );
+      } else {
+        handleErrorMsg(
+          t('ERROR: %s', parsedErrorMessage(message || error || '')),
+        );
+      }
+    } else {
+      handleErrorMsg(
+        t('ERROR: %s', parsedErrorMessage(message || error || '')),
+      );
+    }
+  }
 };
 
 export function useAvailableDatabases() {

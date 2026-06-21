@@ -111,7 +111,7 @@ class SyncPermissionsCommand(BaseCommand):
             except Exception as err:
                 if (
                     self.db_connection.is_oauth2_enabled()
-                    and self.db_connection.db_engine_spec.needs_oauth2(err)
+                    and self.db_connection.db_engine_spec.needs_oauth2(err, self.db_connection)
                 ):
                     raise MissingOAuth2TokenError() from err
                 raise DatabaseConnectionFailedError() from err

@@ -20,10 +20,12 @@ from __future__ import annotations
 import logging
 import re
 import sys
-import urllib
-from datetime import datetime
+import urllib.parse
+from collections.abc import Iterator
+from contextlib import contextmanager, closing
+from datetime import datetime, timezone
 from re import Pattern
-from typing import Any, Callable, TYPE_CHECKING, TypedDict
+from typing import Any, Callable, TYPE_CHECKING, TypedDict, Optional
 
 import pandas as pd
 from apispec import APISpec
@@ -78,10 +80,7 @@ except ModuleNotFoundError:
     can_upload = False
 
 if TYPE_CHECKING:
-    from superset.models.core import Database  # pragma: no cover
-
-
-logger = logging.getLogger()
+    from superset.models.core import Database, ConfigurationMethod  # pragma: no cover
 
 
 # BigQuery string escape sequences keyed off documented escapes in
@@ -603,14 +602,14 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         with cls.get_engine(
             database, catalog=table.catalog, schema=table.schema
         ) as engine:
-            client = cls._get_client(engine, database)
-            table_ref = f"{table.schema}.{table.table}"
-            if table.catalog:
-                table_ref = f"{table.catalog}.{table_ref}"
-            bq_table = client.get_table(table_ref)
+            with cls._get_client(engine, database) as client:
+                table_ref = f"{table.schema}.{table.table}"
+                if table.catalog:
+                    table_ref = f"{table.catalog}.{table_ref}"
+                bq_table = client.get_table(table_ref)
 
-            if bq_table.time_partitioning:
-                return bq_table.time_partitioning.field
+                if bq_table.time_partitioning:
+                    return bq_table.time_partitioning.field
         return None
 
     @classmethod
@@ -729,21 +728,8 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
                 "Could not import libraries needed to connect to BigQuery."
             )
 
-        project: str | None = engine.url.host or None
-
-        if credentials_info := engine.dialect.credentials_info:
-            credentials = service_account.Credentials.from_service_account_info(
-                credentials_info
-            )
-            return bigquery.Client(credentials=credentials, project=project)
-
-        try:
-            credentials = google.auth.default()[0]
-            return bigquery.Client(credentials=credentials, project=project)
-        except google.auth.exceptions.DefaultCredentialsError as ex:
-            raise SupersetDBAPIConnectionError(
-                "The database credentials could not be found."
-            ) from ex
+        with closing(engine.raw_connection()) as conn:
+            yield conn.dbapi_connection._client  # pylint: disable=protected-access
 
     @classmethod
     def estimate_query_cost(  # pylint: disable=too-many-arguments

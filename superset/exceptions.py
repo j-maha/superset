@@ -405,6 +405,23 @@ class OAuth2Error(SupersetErrorException):
         )
 
 
+class OAuth2RequiresSavedDBError(SupersetErrorException):
+    """
+    Exception for when OAuth2 + User Impersonation fails because DB is transient.
+    """
+
+    def __init__(self):
+        super().__init__(
+            SupersetError(
+                message="This database requires OAuth2 authentication. "
+                        "Please save the database first, then test the connection.",
+                error_type=SupersetErrorType.OAUTH2_REQUIRES_SAVED_DATABASE,
+                level=ErrorLevel.WARNING,
+                extra={},
+            )
+        )
+
+
 class SupersetDisallowedSQLFunctionException(SupersetErrorException):
     """
     Disallowed function found on SQL statement
