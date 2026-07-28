@@ -2449,3 +2449,32 @@ def test_build_statement_blocks_skips_validation_for_unparseable_mutated_sql(
 
     assert len(blocks) == 1
     assert blocks[0].count("ENGINE SPECIFIC") == 2
+
+
+def test_sql_executor_cache_key_is_user_scoped_for_impersonation(
+    app_context: None,
+) -> None:
+    """Impersonated SQL results must not be shared across Superset users."""
+    from types import SimpleNamespace
+
+    from flask_appbuilder.security.sqla.models import User
+
+    from superset.models.core import Database
+    from superset.sql.execution.executor import SQLExecutor
+    from superset.utils.core import override_user
+
+    database = Database(
+        database_name="bigquery",
+        sqlalchemy_uri="sqlite://",
+        impersonate_user=True,
+    )
+    database.id = 1
+    executor = SQLExecutor(database)
+    options = SimpleNamespace(catalog=None, schema=None, limit=None)
+
+    with override_user(User(username="alice")):
+        alice_key = executor._generate_cache_key("SELECT 1", options)
+    with override_user(User(username="bob")):
+        bob_key = executor._generate_cache_key("SELECT 1", options)
+
+    assert alice_key != bob_key

@@ -2085,3 +2085,23 @@ def test_prequery_listener_mutation_race_deterministic(
     assert not t_b.is_alive(), "thread B deadlocked"
 
     assert not errors, f"deterministic interleaving raised: {errors!r}"
+
+
+def test_impersonated_engines_bypass_process_cache(app_context: None) -> None:
+    """Impersonated engines are user-specific and must never be shared."""
+    from superset.models.core import _ENGINE_CACHE
+
+    _ENGINE_CACHE.clear()
+    database = Database(
+        database_name="impersonated",
+        sqlalchemy_uri="sqlite://",
+        impersonate_user=True,
+    )
+    database.id = 1
+
+    with database.get_sqla_engine() as first_engine:
+        assert _ENGINE_CACHE == {}
+    with database.get_sqla_engine() as second_engine:
+        assert _ENGINE_CACHE == {}
+
+    assert first_engine is not second_engine

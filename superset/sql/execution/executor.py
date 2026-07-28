@@ -80,6 +80,7 @@ from superset.exceptions import (
 from superset.extensions import cache_manager
 from superset.sql.parse import SQLScript
 from superset.utils import core as utils
+from superset.utils.cache_keys import add_impersonation_cache_key_if_needed
 
 if TYPE_CHECKING:
     from superset_core.queries.types import (
@@ -1026,15 +1027,18 @@ class SQLExecutor:
         :param opts: Query options
         :returns: Cache key string
         """
-        # Include relevant options in the cache key
-        key_parts = [
-            str(self.database.id),
-            sql,
-            opts.catalog or "",
-            opts.schema or "",
-            str(opts.limit) if opts.limit is not None else "",
-        ]
-        key_string = "|".join(key_parts)
+        # Include relevant options in the cache key.
+        cache_values: dict[str, Any] = {
+            "database_id": self.database.id,
+            "sql": sql,
+            "catalog": opts.catalog or "",
+            "schema": opts.schema or "",
+            "limit": opts.limit if opts.limit is not None else "",
+        }
+        add_impersonation_cache_key_if_needed(self.database, cache_values)
+        key_string = "|".join(
+            f"{key}={value}" for key, value in sorted(cache_values.items())
+        )
         return hashlib.sha256(key_string.encode()).hexdigest()
 
     def _submit_query_to_celery(
