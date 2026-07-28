@@ -89,3 +89,37 @@ def test_command_with_oauth2(mocker: MockerFixture) -> None:
         level=ErrorLevel.WARNING,
         extra={"url": "url", "tab_id": "tab_id", "redirect_uri": "redirect_uri"},
     )
+
+
+def test_command_with_oauth2_unsaved_database(mocker: MockerFixture) -> None:
+    """
+    Test that testing an unsaved OAuth2 database connection raises OAuth2RequiresSavedDBError.
+    """
+    from superset.exceptions import SupersetErrorsException
+
+    user = mocker.MagicMock()
+    user.email = "alice@example.org"
+    mocker.patch("superset.db_engine_specs.gsheets.g", user=user)
+    mocker.patch("superset.db_engine_specs.gsheets.create_engine")
+
+    database = mocker.MagicMock()
+    database.id = None
+    database.is_oauth2_enabled.return_value = True
+    database.db_engine_spec.needs_oauth2.return_value = True
+    database.db_engine_spec.__name__ = "GSheetsEngineSpec"
+    with database.get_sqla_engine() as engine:
+        engine.dialect.do_ping.side_effect = Exception("OAuth2 needed")
+
+    DatabaseDAO = mocker.patch("superset.commands.database.test_connection.DatabaseDAO")  # noqa: N806
+    DatabaseDAO.build_db_for_connection_test.return_value = database
+
+    properties = {
+        "sqlalchemy_uri": "gsheets://",
+        "engine": "gsheets",
+        "driver": "gsheets",
+        "catalog": {"test": "https://example.org/"},
+    }
+    command = TestConnectionDatabaseCommand(properties)
+    with pytest.raises(SupersetErrorsException) as excinfo:
+        command.run()
+    assert excinfo.value.errors[0].error_type == SupersetErrorType.OAUTH2_REQUIRES_SAVED_DATABASE

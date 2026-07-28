@@ -185,8 +185,35 @@ def test_get_parameters_from_uri_serializable() -> None:
         "bigquery://dbt-tutorial-347100/",
         {"access_token": "TOP_SECRET"},
     )
-    assert parameters == {"access_token": "TOP_SECRET", "query": {}}
+    assert parameters == {
+        "access_token": "TOP_SECRET",
+        "project_id": "dbt-tutorial-347100",
+        "query": {},
+    }
     assert json.loads(json.dumps(parameters)) == parameters
+
+
+def test_build_sqlalchemy_uri_without_service_credentials() -> None:
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    assert (
+        BigQueryEngineSpec.build_sqlalchemy_uri(
+            {"project_id": "oauth-project", "query": {}}
+        )
+        == "bigquery://oauth-project/?"
+    )
+
+
+def test_build_sqlalchemy_uri_rejects_project_mismatch() -> None:
+    from marshmallow import ValidationError
+
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    with pytest.raises(ValidationError, match="does not match"):
+        BigQueryEngineSpec.build_sqlalchemy_uri(
+            {"project_id": "entered-project", "query": {}},
+            {"credentials_info": {"project_id": "credential-project"}},
+        )
 
 
 def test_unmask_encrypted_extra() -> None:
@@ -714,8 +741,12 @@ def test_get_view_names_excludes_materialized_views() -> None:
 def _patch_bq_fetch_deps(
     mocker: MockerFixture, max_mb: int = 200
 ) -> tuple[mock.MagicMock, mock.MagicMock]:
-    """Helper to patch Flask g and current_app for BigQuery fetch_data tests."""
+    """Patch Flask request globals for BigQuery fetch_data tests."""
     flask_g = mocker.patch("superset.db_engine_specs.bigquery.g")
+    mocker.patch(
+        "superset.db_engine_specs.bigquery.has_request_context",
+        return_value=True,
+    )
     app = mocker.patch("superset.db_engine_specs.bigquery.current_app")
     # Make current_app truthy and .config.get() return a plain int
     app.__bool__ = mock.Mock(return_value=True)
@@ -1101,3 +1132,80 @@ def test_monkeypatch_handles_missing_bigquery_package() -> None:
     with mock.patch("builtins.__import__", side_effect=mock_import):
         # Should not raise — the except ImportError branch handles it
         _monkeypatch_bigquery_string_literal()
+
+
+def test_extended_dialect_keeps_oauth_token_out_of_url() -> None:
+    """The extended dialect constructs OAuth credentials without URL secrets."""
+    from unittest.mock import patch
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.dialects import registry
+
+    registry.register(
+        "bigquery.test_extended",
+        "superset.db_engine_specs.bigquery_dialect",
+        "ExtendedQueryDialect",
+    )
+
+    with patch("superset.db_engine_specs.bigquery_dialect.bigquery.Client") as client:
+        client.return_value.project = "demo-project"
+        engine = create_engine(
+            "bigquery+test_extended://demo-project",
+            oauth_token_provider=lambda: "synthetic-token",
+        )
+
+        assert "synthetic-token" not in str(engine.url)
+        assert client.call_args.kwargs["credentials"].token == "synthetic-token"  # noqa: S105
+
+
+
+def test_needs_oauth2_when_impersonation_token_is_missing(
+    app_context: None,
+) -> None:
+    """A missing per-user token must trigger OAuth for logged-in users."""
+    from flask import g
+
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    g.user = mock.MagicMock()
+
+    assert BigQueryEngineSpec.needs_oauth2(
+        ValueError("An OAuth2 access token is required for impersonation")
+    )
+
+
+def test_impersonate_user_selects_extended_driver() -> None:
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mock.MagicMock()
+    database.get_encrypted_extra.return_value = {}
+    url, engine_kwargs = BigQueryEngineSpec.impersonate_user(
+        database,
+        "alice",
+        "synthetic-token",
+        make_url("bigquery://demo-project"),
+        {},
+    )
+
+    assert url.drivername == "bigquery+extended"
+    assert engine_kwargs["oauth_token_provider"]() == "synthetic-token"  # noqa: S105
+    assert "synthetic-token" not in repr(engine_kwargs)
+
+
+def test_impersonate_user_rejects_service_account_credentials() -> None:
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.exceptions import SupersetException
+
+    database = mock.MagicMock()
+    database.get_encrypted_extra.return_value = {
+        "credentials_info": {"project_id": "demo-project"},
+    }
+
+    with pytest.raises(SupersetException, match="cannot be used together"):
+        BigQueryEngineSpec.impersonate_user(
+            database,
+            "alice",
+            "synthetic-token",
+            make_url("bigquery://demo-project"),
+            {},
+        )

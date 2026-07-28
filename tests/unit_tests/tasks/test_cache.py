@@ -398,3 +398,29 @@ def test_native_filter_options_strategy_registered() -> None:
     from superset.tasks.cache import NativeFilterOptionsStrategy, strategy_registry
 
     assert strategy_registry["native_filter_options"] is NativeFilterOptionsStrategy
+
+
+def test_warmup_predicate_detects_impersonated_database() -> None:
+    from types import SimpleNamespace
+    from typing import cast
+
+    from superset.common.query_context import QueryContext
+    from superset.models.core import Database
+    from superset.tasks.cache import _uses_impersonated_database, CacheWarmupTask
+
+    database = Database(
+        database_name="bigquery",
+        sqlalchemy_uri="sqlite://",
+        impersonate_user=True,
+    )
+    task = CacheWarmupTask(
+        query_context=cast(
+            QueryContext,
+            SimpleNamespace(
+                datasource=SimpleNamespace(database=database),
+            ),
+        ),
+        dashboard_id=1,
+    )
+
+    assert _uses_impersonated_database(task) is True
