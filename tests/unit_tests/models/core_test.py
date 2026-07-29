@@ -1358,7 +1358,13 @@ def test_purge_oauth2_tokens(session: Session) -> None:
         email="adoe@example.org",
         username="adoe",
     )
-    session.add(user)
+    user_b = User(
+        first_name="Bob",
+        last_name="Doe",
+        email="bdoe@example.org",
+        username="bdoe",
+    )
+    session.add_all([user, user_b])
     session.flush()
 
     database1 = Database(database_name="my_oauth2_db", sqlalchemy_uri="sqlite://")
@@ -1375,28 +1381,32 @@ def test_purge_oauth2_tokens(session: Session) -> None:
             refresh_token="my_refresh_token",  # noqa: S106
         ),
         DatabaseUserOAuth2Tokens(
-            user_id=user.id,
-            database_id=database2.id,
+            user_id=user_b.id,
+            database_id=database1.id,
             access_token="my_other_access_token",  # noqa: S106
             access_token_expiration=datetime(2024, 1, 1),
             refresh_token="my_other_refresh_token",  # noqa: S106
+        ),
+        DatabaseUserOAuth2Tokens(
+            user_id=user.id,
+            database_id=database2.id,
+            access_token="my_database_two_access_token",  # noqa: S106
+            access_token_expiration=datetime(2025, 1, 1),
+            refresh_token="my_database_two_refresh_token",  # noqa: S106
         ),
     ]
     session.add_all(tokens)
     session.flush()
 
-    assert len(session.query(DatabaseUserOAuth2Tokens).all()) == 2
+    assert len(session.query(DatabaseUserOAuth2Tokens).all()) == 3
 
-    token = (
+    database_one_tokens = (
         session.query(DatabaseUserOAuth2Tokens)
         .filter_by(database_id=database1.id)
-        .one()
+        .all()
     )
-    assert token.user_id == user.id
-    assert token.database_id == database1.id
-    assert token.access_token == "my_access_token"  # noqa: S105
-    assert token.access_token_expiration == datetime(2023, 1, 1)
-    assert token.refresh_token == "my_refresh_token"  # noqa: S105
+    assert {token.user_id for token in database_one_tokens} == {user.id, user_b.id}
+    assert all(token.database_id == database1.id for token in database_one_tokens)
 
     database1.purge_oauth2_tokens()
 

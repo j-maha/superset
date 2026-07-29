@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from superset.exceptions import SupersetErrorsException
+from superset.exceptions import OAuth2RedirectError, SupersetErrorsException
 from superset.sqllab.sql_json_executer import SynchronousSqlJsonExecutor
 from superset.utils.core import QueryStatus
 
@@ -38,9 +38,56 @@ def _make_executor(data: dict[str, Any]) -> SynchronousSqlJsonExecutor:
 def _make_execution_context() -> MagicMock:
     execution_context = MagicMock()
     execution_context.query.id = 1
+    execution_context.user_id = None
     execution_context.expand_data = False
     execution_context.select_as_cta = False
     return execution_context
+
+
+
+def test_execute_preserves_oauth2_redirect_error() -> None:
+    """OAuth redirects must not be converted to generic database errors."""
+    query_dao = MagicMock()
+    oauth_error = OAuth2RedirectError(
+        "https://accounts.google.com/o/oauth2/auth",
+        "tab-id",
+        "http://localhost:8088/api/v1/database/oauth2/",
+    )
+    get_sql_results_task = MagicMock(side_effect=oauth_error)
+    executor = SynchronousSqlJsonExecutor(
+        query_dao,
+        get_sql_results_task,
+        timeout_duration_in_seconds=60,
+        sqllab_backend_persistence_feature_enable=False,
+    )
+
+    with pytest.raises(OAuth2RedirectError) as excinfo:
+        executor.execute(_make_execution_context(), "SELECT 1", None)
+
+    assert excinfo.value is oauth_error
+
+
+
+def test_execute_uses_persisted_query_user_for_task(monkeypatch: Any) -> None:
+    """Use the query user when request context does not expose a username."""
+    query_dao = MagicMock()
+    get_sql_results_task = MagicMock(return_value={"status": QueryStatus.SUCCESS})
+    monkeypatch.setattr(
+        "superset.sqllab.sql_json_executer.security_manager.get_user_by_id",
+        lambda _: MagicMock(username="alice"),
+    )
+    executor = SynchronousSqlJsonExecutor(
+        query_dao,
+        get_sql_results_task,
+        timeout_duration_in_seconds=60,
+        sqllab_backend_persistence_feature_enable=False,
+    )
+    execution_context = _make_execution_context()
+    execution_context.user_id = 1
+
+    executor.execute(execution_context, "SELECT 1", None)
+
+    assert get_sql_results_task.call_args.kwargs["username"] == "alice"
 
 
 def test_execute_raises_400_when_all_errors_are_warnings() -> None:

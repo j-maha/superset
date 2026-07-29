@@ -1158,6 +1158,22 @@ def test_extended_dialect_keeps_oauth_token_out_of_url() -> None:
         assert client.call_args.kwargs["credentials"].token == "synthetic-token"  # noqa: S105
 
 
+
+def test_needs_oauth2_when_impersonation_token_is_missing(
+    app_context: None,
+) -> None:
+    """A missing per-user token must trigger OAuth for logged-in users."""
+    from flask import g
+
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    g.user = mock.MagicMock()
+
+    assert BigQueryEngineSpec.needs_oauth2(
+        ValueError("An OAuth2 access token is required for impersonation")
+    )
+
+
 def test_impersonate_user_selects_extended_driver() -> None:
     from superset.db_engine_specs.bigquery import BigQueryEngineSpec
 
