@@ -41,7 +41,11 @@ from superset.commands.database.test_connection import TestConnectionDatabaseCom
 from superset.commands.database.utils import add_permissions
 from superset.daos.database import DatabaseDAO
 from superset.databases.utils import make_url_safe
-from superset.exceptions import OAuth2RedirectError, SupersetErrorsException
+from superset.exceptions import (
+    OAuth2RedirectError,
+    OAuth2RequiresSavedDBError,
+    SupersetErrorsException,
+)
 from superset.extensions import event_logger
 from superset.models.core import Database
 from superset.utils.decorators import on_error, transaction
@@ -67,7 +71,7 @@ class CreateDatabaseCommand(BaseCommand):
         try:
             # Test connection before starting create transaction
             TestConnectionDatabaseCommand(self._properties).run()
-        except OAuth2RedirectError:
+        except (OAuth2RedirectError, OAuth2RequiresSavedDBError):
             # If we can't connect to the database due to an OAuth2 error we can still
             # save the database. Later, the user can sync permissions when setting up
             # data access rules.

@@ -312,9 +312,14 @@ def check_for_oauth2(database: Database) -> Iterator[None]:
     """
     Run code and check if OAuth2 is needed.
     """
+    from superset.exceptions import OAuth2RequiresSavedDBError
+
     try:
         yield
     except Exception as ex:
         if database.is_oauth2_enabled() and database.db_engine_spec.needs_oauth2(ex):
-            database.db_engine_spec.start_oauth2_dance(database)
+            if database.id:
+                database.db_engine_spec.start_oauth2_dance(database)
+            else:
+                raise OAuth2RequiresSavedDBError()
         raise

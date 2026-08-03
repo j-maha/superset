@@ -38,6 +38,7 @@ from superset.databases.utils import make_url_safe
 from superset.errors import ErrorLevel, SupersetErrorType
 from superset.exceptions import (
     OAuth2RedirectError,
+    OAuth2RequiresSavedDBError,
     SupersetErrorsException,
     SupersetSecurityException,
     SupersetTimeoutException,
@@ -156,11 +157,7 @@ class TestConnectionDatabaseCommand(BaseCommand):
                     ) from ex
                 except Exception as ex:  # pylint: disable=broad-except
                     # If the connection failed because OAuth2 is needed, start the flow.
-                    if (
-                        database.is_oauth2_enabled()
-                        and database.db_engine_spec.needs_oauth2(ex)
-                    ):
-                        database.start_oauth2_dance()
+                    self._check_handle_oauth2_needed(ex, database)
 
                     alive = False
                     # So we stop losing the original message if any
@@ -212,6 +209,8 @@ class TestConnectionDatabaseCommand(BaseCommand):
             raise SupersetErrorsException(errors, status=400) from ex
         except OAuth2RedirectError:
             raise
+        except OAuth2RequiresSavedDBError as ex:
+            raise SupersetErrorsException([ex.error], status=400) from ex
         except SupersetSecurityException as ex:
             event_logger.log_with_context(
                 action=get_log_connection_action(
@@ -242,10 +241,7 @@ class TestConnectionDatabaseCommand(BaseCommand):
             if not database:
                 raise
 
-            if database.is_oauth2_enabled() and database.db_engine_spec.needs_oauth2(
-                ex
-            ):
-                database.start_oauth2_dance()
+            self._check_handle_oauth2_needed(ex, database)
             event_logger.log_with_context(
                 action=get_log_connection_action(
                     "test_connection_error",
@@ -256,6 +252,21 @@ class TestConnectionDatabaseCommand(BaseCommand):
             )
             errors = database.db_engine_spec.extract_errors(ex, self._context)
             raise DatabaseTestConnectionUnexpectedError(errors) from ex
+
+    def _check_handle_oauth2_needed(self, ex: Exception, database: Database) -> None:
+        """Handle the case where OAuth2 authentication is required."""
+        if (
+            not database.is_oauth2_enabled()
+            or not database.db_engine_spec.needs_oauth2(ex)
+        ):
+            return
+
+        if self._model and self._model.id:
+            self._model.start_oauth2_dance()
+        elif database.id:
+            database.start_oauth2_dance()
+        else:
+            raise OAuth2RequiresSavedDBError()
 
     def validate(self) -> None:
         if self._properties.get("ssh_tunnel"):
