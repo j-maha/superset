@@ -377,12 +377,13 @@ The items below were completed in the next checkpoint; see the latest entry for 
 
 
 
-## 2026-08-03 — UI Validation Session Started
+## 2026-08-03 — UI Validation Session Summary
 
 ### Session Start
 - **Branch**: Created `bot/ui-oauth-validation` from `bot/gcp-validation`
 - **Servers Started**: Backend (8088) and Frontend (9000) via `./superset_home/setup.sh`
 - **Login Verified**: Admin login successful via curl, session cookie obtained
+- **Git Push**: Successfully pushed to `origin/bot/ui-oauth-validation`
 
 ### Current Status
 - Backend: ⚠️ Intermittent hangs, requires restart
@@ -400,20 +401,67 @@ The items below were completed in the next checkpoint; see the latest entry for 
 
 ### Work Around
 Given browser integration issues, **manual human testing is required** for UI validation:
+
+**Manual Test Steps**:
 1. Open browser to `http://localhost:8088/databaseview/list/`
 2. Login with admin/admin
 3. Click "+ DATABASE" or "Create"
-4. Select BigQuery, enter `bigquery://superset-test-proj`
-5. Check "Impersonate user" checkbox
-6. Click "Test Connection" → Should show "Connection looks good!"
-7. Click "Connect" → Should save successfully
-8. Verify database appears in list
+4. Select BigQuery database type
+5. Enter SQLAlchemy URI: `bigquery://superset-test-proj`
+6. Check the **"Impersonate user"** checkbox
+7. Click **"Test Connection"** button
+   - **Expected**: Shows "Connection looks good!" success message
+   - **Expected**: "Connect" button becomes enabled
+8. Click **"Connect"** or **"Save"** button
+   - **Expected**: Database saves successfully (HTTP 201)
+   - **Expected**: No OAuth redirect during save
+9. Verify database appears in the list view
+10. (Optional) Navigate to SQL Lab and run `SELECT 1`
+    - **Expected**: OAuth redirect to Google should trigger
 
-### Next Action (Alternative)
-Since browser testing is blocked, proceeding with:
-- Code review of UI-related changes
-- Documentation updates
-- Test coverage analysis
+### Code Changes Ready for Testing
+The following backend changes enable the UI flow:
+
+1. **`superset/exceptions.py`**: Added `OAuth2RequiresSavedDBError` exception
+2. **`superset/utils/oauth2.py`**: Updated `check_for_oauth2()` to check `database.id`
+3. **`superset/commands/database/test_connection.py`**: 
+   - Catches `OAuth2RequiresSavedDBError`
+   - Returns HTTP 400 for unsaved databases (or HTTP 200 with `alive=True`)
+4. **`superset/commands/database/create.py`**: 
+   - Catches `(OAuth2RedirectError, OAuth2RequiresSavedDBError)`
+   - Allows database creation to proceed
+5. **`superset/db_engine_specs/bigquery.py`**: 
+   - `get_catalog_names()` catches `OAuth2RedirectError`
+   - Falls back to `{database.get_default_catalog()}`
+6. **`superset/utils/database.py`**: 
+   - `add_permissions()` catches `OAuth2RedirectError`
+   - Falls back gracefully during permission setup
+
+### Frontend Behavior (Unchanged)
+The frontend code (`DatabaseModal/index.tsx`) works as designed:
+- `testConnection()` calls `testDatabaseConnection()` API
+- On success callback: `setHasValidated(true)` enables "Connect" button
+- On error callback: `setHasValidated(false)` keeps button disabled
+- "Connect" button disabled when: `!hasValidated || isValidating || validationErrors`
+
+### Next Steps (Blocked)
+- ❌ Browser UI testing (blocked by integration issues)
+- ⏳ Manual human testing required (see steps above)
+- ⏳ OAuth flow validation (requires GCP IAM setup)
+- ⏳ Multi-user isolation testing
+
+### Recommendations
+1. **Immediate**: User to perform manual UI testing using steps above
+2. **Next Session**: Resume with OAuth refresh/error tests (doesn't require browser)
+3. **Future**: Multi-user testing with Gamma/Alpha roles
+
+### Files Modified This Session
+- `superset_home/bigquery-oauth2/WORK_LOG.md` - Updated with session status
+
+### Git Status
+- **Branch**: `bot/ui-oauth-validation`
+- **Commit**: `963e389578` - "docs: update work log with UI validation session status and blockers"
+- **Pushed**: ✅ Yes, to `origin/bot/ui-oauth-validation`
 
 
 
