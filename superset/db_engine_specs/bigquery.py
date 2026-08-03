@@ -847,22 +847,18 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
 
         In BigQuery, a catalog is called a "project".
         """
-        engine: Engine
-        with database.get_sqla_engine() as engine:
-            try:
+        try:
+            with database.get_sqla_engine() as engine:
                 client = cls._get_client(engine, database)
-            except SupersetDBAPIConnectionError:
-                logger.warning(
-                    "Could not connect to database to get catalogs due to missing "
-                    "credentials. This is normal in certain circustances, for example, "
-                    "doing an import."
-                )
-                # return {} here, since it will be repopulated when creds are added
-                return set()
-
-            projects = client.list_projects()
-
-        return {project.project_id for project in projects}
+                projects = client.list_projects()
+                return {project.project_id for project in projects}
+        except (SupersetDBAPIConnectionError, OAuth2RedirectError):
+            logger.warning(
+                "Could not connect to database to get catalogs due to missing "
+                "credentials or OAuth2 required. Returning default catalog."
+            )
+            default_catalog = database.get_default_catalog()
+            return {default_catalog} if default_catalog else set()
 
     @classmethod
     def needs_oauth2(cls, ex: Exception) -> bool:

@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from superset import security_manager
 from superset.db_engine_specs.base import GenericDBException
+from superset.exceptions import OAuth2RedirectError
 from superset.models.core import Database
 from superset.security.manager import SupersetSecurityManager
 from superset.utils.core import timeout
@@ -66,7 +67,11 @@ def add_permissions(database: Database) -> None:
             database.db_engine_spec.supports_cross_catalog_queries
             or database.allow_multi_catalog
         ):
-            catalogs = database.get_all_catalog_names(cache=False)
+            try:
+                catalogs = database.get_all_catalog_names(cache=False)
+            except OAuth2RedirectError:
+                default_catalog = database.get_default_catalog()
+                catalogs = {default_catalog} if default_catalog else set()
         else:
             catalogs = {database.get_default_catalog()}
 

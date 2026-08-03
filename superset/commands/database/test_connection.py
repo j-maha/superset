@@ -141,27 +141,32 @@ class TestConnectionDatabaseCommand(BaseCommand):
                 engine=engine_name,
             )
 
-            with database.get_sqla_engine() as engine:
-                try:
-                    alive = ping(engine)
-                except SupersetTimeoutException as ex:
-                    raise SupersetTimeoutException(
-                        error_type=SupersetErrorType.CONNECTION_DATABASE_TIMEOUT,
-                        message=(
-                            "Please check your connection details and database settings, "  # noqa: E501
-                            "and ensure that your database is accepting connections, "
-                            "then try connecting again."
-                        ),
-                        level=ErrorLevel.ERROR,
-                        extra={"sqlalchemy_uri": database.sqlalchemy_uri},
-                    ) from ex
-                except Exception as ex:  # pylint: disable=broad-except
-                    # If the connection failed because OAuth2 is needed, start the flow.
-                    self._check_handle_oauth2_needed(ex, database)
+            try:
+                with database.get_sqla_engine() as engine:
+                    try:
+                        alive = ping(engine)
+                    except SupersetTimeoutException as ex:
+                        raise SupersetTimeoutException(
+                            error_type=SupersetErrorType.CONNECTION_DATABASE_TIMEOUT,
+                            message=(
+                                "Please check your connection details and database settings, "  # noqa: E501
+                                "and ensure that your database is accepting connections, "
+                                "then try connecting again."
+                            ),
+                            level=ErrorLevel.ERROR,
+                            extra={"sqlalchemy_uri": database.sqlalchemy_uri},
+                        ) from ex
+                    except Exception as ex:  # pylint: disable=broad-except
+                        # If the connection failed because OAuth2 is needed, start the flow.
+                        self._check_handle_oauth2_needed(ex, database)
 
-                    alive = False
-                    # So we stop losing the original message if any
-                    ex_str = str(ex)
+                        alive = False
+                        # So we stop losing the original message if any
+                        ex_str = str(ex)
+            except OAuth2RequiresSavedDBError:
+                # For an unsaved database requiring OAuth2, connection parameters are valid.
+                # Per-user OAuth authentication will occur in SQL Lab after saving.
+                alive = True
 
             if not alive:
                 raise DBAPIError(ex_str or None, None, None)
