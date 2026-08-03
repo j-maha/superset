@@ -25,7 +25,6 @@ from typing import Any, Callable, TYPE_CHECKING
 from flask_babel import gettext as __
 
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
-from superset.extensions import security_manager
 from superset.exceptions import (
     OAuth2RedirectError,
     SupersetErrorException,
@@ -33,6 +32,7 @@ from superset.exceptions import (
     SupersetGenericDBErrorException,
     SupersetTimeoutException,
 )
+from superset.extensions import security_manager
 from superset.sqllab.command_status import SqlJsonExecutionStatus
 from superset.utils import core as utils
 from superset.utils.core import get_username

@@ -21,6 +21,7 @@ import { waitFor } from 'spec/helpers/testing-library';
 import { JsonResponse, SupersetClient } from '@superset-ui/core';
 
 import {
+  testDatabaseConnection,
   useListViewResource,
   useSingleViewResource,
   useFavoriteStatus,
@@ -45,6 +46,39 @@ function findEndpoint(spy: jest.SpyInstance, substring: string): string {
 
 beforeEach(() => {
   jest.restoreAllMocks();
+});
+
+test('testDatabaseConnection reports OAuth authorization requirements', async () => {
+  const handleErrorMsg = jest.fn();
+  const handleErrorType = jest.fn();
+  const addSuccessToast = jest.fn();
+  const response = new Response(
+    JSON.stringify({
+      errors: [
+        {
+          message:
+            'This database requires OAuth2 authentication. Please save the database first, then authorize in SQL Lab.',
+          error_type: 'OAUTH2_REQUIRES_SAVED_DATABASE',
+          level: 'warning',
+          extra: {},
+        },
+      ],
+    }),
+    { status: 400, headers: { 'Content-Type': 'application/json' } },
+  );
+  jest.spyOn(SupersetClient, 'post').mockRejectedValue({ response });
+
+  testDatabaseConnection({}, handleErrorMsg, addSuccessToast, handleErrorType);
+
+  await waitFor(() => {
+    expect(handleErrorMsg).toHaveBeenCalledWith(
+      expect.stringContaining('requires OAuth2 authentication'),
+    );
+  });
+  expect(handleErrorType).toHaveBeenCalledWith(
+    'OAUTH2_REQUIRES_SAVED_DATABASE',
+  );
+  expect(addSuccessToast).not.toHaveBeenCalled();
 });
 
 // useListViewResource

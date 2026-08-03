@@ -70,7 +70,10 @@ class CreateDatabaseCommand(BaseCommand):
 
         try:
             # Test connection before starting create transaction
-            TestConnectionDatabaseCommand(self._properties).run()
+            TestConnectionDatabaseCommand(
+                self._properties,
+                allow_oauth2_requires_saved_db=True,
+            ).run()
         except (OAuth2RedirectError, OAuth2RequiresSavedDBError):
             # If we can't connect to the database due to an OAuth2 error we can still
             # save the database. Later, the user can sync permissions when setting up
@@ -95,6 +98,7 @@ class CreateDatabaseCommand(BaseCommand):
             )
             raise DatabaseConnectionFailedError() from ex
 
+        database: Database | None = None
         try:
             # create database and associated schema/catalog permissions
             database = self._create_database()
@@ -111,10 +115,15 @@ class CreateDatabaseCommand(BaseCommand):
             )
             # So we can show the original message
             raise
-        except (
-            DatabaseInvalidError,
-            Exception,
-        ) as ex:
+        except Exception as ex:
+            if database and database.db_engine_spec.needs_oauth2(ex):
+                logger.warning(
+                    "Skipping permission sync for database '%s' until OAuth2 "
+                    "authorization is completed.",
+                    database.database_name,
+                )
+                return database
+
             event_logger.log_with_context(
                 action=f"db_creation_failed.{ex.__class__.__name__}",
                 engine=engine,

@@ -51,7 +51,7 @@ from superset.db_engine_specs.base import (
 )
 from superset.db_engine_specs.exceptions import SupersetDBAPIConnectionError
 from superset.errors import SupersetError, SupersetErrorType
-from superset.exceptions import SupersetException
+from superset.exceptions import OAuth2RedirectError, SupersetException
 from superset.sql.parse import SQLScript, Table
 from superset.superset_typing import ResultSetColumnType
 from superset.utils import core as utils, json
@@ -868,12 +868,7 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
                 ex = ex.args[0]
         if super().needs_oauth2(ex):
             return True
-        return (
-            dependencies_installed
-            and str(ex) == "An OAuth2 access token is required for impersonation"
-            and g
-            and hasattr(g, "user")
-        )
+        return str(ex) == "An OAuth2 access token is required for impersonation"
 
     @classmethod
     def _has_service_account_credentials(cls, database: Database) -> bool:

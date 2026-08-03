@@ -39,7 +39,11 @@ from superset.commands.database.uploaders.csv_reader import CSVReader
 from superset.commands.database.uploaders.excel_reader import ExcelReader
 from superset.db_engine_specs.sqlite import SqliteEngineSpec
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
-from superset.exceptions import OAuth2RedirectError, SupersetSecurityException
+from superset.exceptions import (
+    OAuth2RedirectError,
+    OAuth2RequiresSavedDBError,
+    SupersetSecurityException,
+)
 from superset.sql.parse import Partition, Table
 from superset.superset_typing import OAuth2State
 from superset.utils import json
@@ -49,6 +53,29 @@ from tests.unit_tests.fixtures.common import (
     create_csv_file,
     create_excel_file,
 )
+
+
+def test_test_connection_oauth2_requires_saved_database(
+    client: Any,
+    mocker: MockerFixture,
+    full_api_access: None,
+) -> None:
+    """Return a visible error instead of success when OAuth needs a saved DB."""
+    mocker.patch(
+        "superset.databases.api.TestConnectionDatabaseCommand.run",
+        side_effect=OAuth2RequiresSavedDBError(),
+    )
+
+    response = client.post(
+        "/api/v1/database/test_connection/",
+        json={"sqlalchemy_uri": "sqlite://"},
+    )
+
+    assert response.status_code == 400
+    assert response.json["message"] == (
+        "This database requires OAuth2 authentication. Please save the database first, "
+        "then authorize in SQL Lab."
+    )
 
 
 def test_filter_by_uuid(

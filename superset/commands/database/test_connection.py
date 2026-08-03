@@ -66,9 +66,15 @@ class TestConnectionDatabaseCommand(BaseCommand):
     _model: Optional[Database] = None
     _context: dict[str, Any]
     _uri: str
+    _allow_oauth2_requires_saved_db: bool
 
-    def __init__(self, data: dict[str, Any]):
+    def __init__(
+        self,
+        data: dict[str, Any],
+        allow_oauth2_requires_saved_db: bool = False,
+    ):
         self._properties = data.copy()
+        self._allow_oauth2_requires_saved_db = allow_oauth2_requires_saved_db
 
         if (database_name := self._properties.get("database_name")) is not None:
             self._model = DatabaseDAO.get_database_by_name(database_name)
@@ -150,22 +156,24 @@ class TestConnectionDatabaseCommand(BaseCommand):
                             error_type=SupersetErrorType.CONNECTION_DATABASE_TIMEOUT,
                             message=(
                                 "Please check your connection details and database settings, "  # noqa: E501
-                                "and ensure that your database is accepting connections, "
-                                "then try connecting again."
+                                "and ensure that your database is accepting "
+                                "connections, then try connecting again."
                             ),
                             level=ErrorLevel.ERROR,
                             extra={"sqlalchemy_uri": database.sqlalchemy_uri},
                         ) from ex
                     except Exception as ex:  # pylint: disable=broad-except
-                        # If the connection failed because OAuth2 is needed, start the flow.
+                        # If the connection failed because OAuth2 is needed,
+                        # start the flow.
                         self._check_handle_oauth2_needed(ex, database)
 
                         alive = False
                         # So we stop losing the original message if any
                         ex_str = str(ex)
             except OAuth2RequiresSavedDBError:
-                # For an unsaved database requiring OAuth2, connection parameters are valid.
-                # Per-user OAuth authentication will occur in SQL Lab after saving.
+                if not self._allow_oauth2_requires_saved_db:
+                    raise
+                # Database creation can proceed before per-user OAuth authorization.
                 alive = True
 
             if not alive:
@@ -246,7 +254,21 @@ class TestConnectionDatabaseCommand(BaseCommand):
             if not database:
                 raise
 
-            self._check_handle_oauth2_needed(ex, database)
+            try:
+                self._check_handle_oauth2_needed(ex, database)
+            except OAuth2RequiresSavedDBError:
+                if not self._allow_oauth2_requires_saved_db:
+                    raise
+                # Engine construction can fail before the inner ping handler runs.
+                event_logger.log_with_context(
+                    action=get_log_connection_action(
+                        "test_connection_success",
+                        ssh_tunnel_properties,
+                    ),
+                    engine=engine_name,
+                )
+                return
+
             event_logger.log_with_context(
                 action=get_log_connection_action(
                     "test_connection_error",
@@ -260,18 +282,27 @@ class TestConnectionDatabaseCommand(BaseCommand):
 
     def _check_handle_oauth2_needed(self, ex: Exception, database: Database) -> None:
         """Handle the case where OAuth2 authentication is required."""
+        needs_oauth2 = database.db_engine_spec.needs_oauth2(ex)
         if (
-            not database.is_oauth2_enabled()
-            or not database.db_engine_spec.needs_oauth2(ex)
+            not needs_oauth2
+            and database.db_engine_spec.engine == "bigquery"
+            and str(ex) == "An OAuth2 access token is required for impersonation"
         ):
+            needs_oauth2 = True
+
+        if not needs_oauth2:
+            return
+
+        if not (self._model and self._model.id) and not database.id:
+            raise OAuth2RequiresSavedDBError()
+
+        if not database.is_oauth2_enabled():
             return
 
         if self._model and self._model.id:
             self._model.start_oauth2_dance()
-        elif database.id:
-            database.start_oauth2_dance()
         else:
-            raise OAuth2RequiresSavedDBError()
+            database.start_oauth2_dance()
 
     def validate(self) -> None:
         if self._properties.get("ssh_tunnel"):

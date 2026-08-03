@@ -38,7 +38,11 @@ from sqlalchemy.sql import Select
 
 from superset.connectors.sqla.models import SqlaTable, TableColumn
 from superset.errors import SupersetErrorType
-from superset.exceptions import OAuth2Error, OAuth2RedirectError
+from superset.exceptions import (
+    OAuth2Error,
+    OAuth2RedirectError,
+    OAuth2RequiresSavedDBError,
+)
 from superset.models.core import Database
 from superset.sql.parse import LimitMethod, Table
 from superset.utils import json
@@ -1335,11 +1339,11 @@ def test_engine_oauth2(mocker: MockerFixture) -> None:
         side_effect=OAuth2Error("OAuth2 required"),
     )
 
-    with pytest.raises(OAuth2Error):
+    with pytest.raises(OAuth2RequiresSavedDBError):
         with database.get_sqla_engine("catalog", "schema"):
             pass
 
-    start_oauth2_dance.assert_called_with(database)
+    start_oauth2_dance.assert_not_called()
 
 
 def test_purge_oauth2_tokens(session: Session) -> None:

@@ -44,7 +44,6 @@ def _make_execution_context() -> MagicMock:
     return execution_context
 
 
-
 def test_execute_preserves_oauth2_redirect_error() -> None:
     """OAuth redirects must not be converted to generic database errors."""
     query_dao = MagicMock()
@@ -65,7 +64,6 @@ def test_execute_preserves_oauth2_redirect_error() -> None:
         executor.execute(_make_execution_context(), "SELECT 1", None)
 
     assert excinfo.value is oauth_error
-
 
 
 def test_execute_uses_persisted_query_user_for_task(monkeypatch: Any) -> None:

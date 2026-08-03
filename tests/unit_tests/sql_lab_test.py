@@ -26,7 +26,6 @@ from freezegun import freeze_time
 from pytest_mock import MockerFixture
 
 from superset.app import SupersetApp
-from superset.common.db_query_status import QueryStatus
 from superset.db_engine_specs.postgres import PostgresEngineSpec
 from superset.errors import ErrorLevel, SupersetErrorType
 from superset.exceptions import OAuth2Error, OAuth2RedirectError, SupersetErrorException
