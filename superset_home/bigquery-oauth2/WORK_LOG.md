@@ -758,3 +758,14 @@ After platform restart, browser integration tools are now **fully functional**.
 - Recovered the uncommitted `OAuth2RequiresSavedDBError` definition and SQL Lab redirect-preservation changes.
 - Focused SQL Lab and BigQuery regressions passed: **68 passed**; applicable pre-commit hooks passed.
 - Pushed repair commit `cd53ba8ec0` to `bot/bigquery-oauth-saved-flow-followup`.
+
+
+## 2026-08-04 - Isolated OAuth refresh persistence validation
+
+- Added a real SQLite/ORM regression covering expired access-token refresh and refresh-token rotation without contacting Google or using live credentials.
+- Verified refreshed access and refresh tokens survive `flush()` and a new ORM query.
+- Updated the unsaved-database model test to expect `OAuth2RequiresSavedDBError` and confirmed the OAuth dance is not started before persistence.
+- Focused OAuth, BigQuery, SQL Lab, command, and executor coverage passed: **247 passed**; OAuth/model subset passed: **37 passed**.
+- Two unrelated engine-cache tests remain blocked by the unavailable `sqlalchemy.dialects:trino` plugin.
+- Applicable pre-commit hooks passed.
+- Pushed commit `9f33cb3317` to `bot/bigquery-oauth-saved-flow-followup`.
