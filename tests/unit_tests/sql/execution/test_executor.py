@@ -2455,9 +2455,8 @@ def test_sql_executor_cache_key_is_user_scoped_for_impersonation(
     app_context: None,
 ) -> None:
     """Impersonated SQL results must not be shared across Superset users."""
-    from types import SimpleNamespace
-
     from flask_appbuilder.security.sqla.models import User
+    from superset_core.queries.types import QueryOptions
 
     from superset.models.core import Database
     from superset.sql.execution.executor import SQLExecutor
@@ -2470,7 +2469,7 @@ def test_sql_executor_cache_key_is_user_scoped_for_impersonation(
     )
     database.id = 1
     executor = SQLExecutor(database)
-    options = SimpleNamespace(catalog=None, schema=None, limit=None)
+    options = QueryOptions()
 
     with override_user(User(username="alice")):
         alice_key = executor._generate_cache_key("SELECT 1", options)
