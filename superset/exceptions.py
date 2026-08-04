@@ -405,21 +405,24 @@ class OAuth2Error(SupersetErrorException):
         )
 
 
-
 class OAuth2RequiresSavedDBError(SupersetErrorException):
     """
-    Exception for when OAuth2 + User Impersonation connection test fails because DB is not saved yet.
+    Exception for an OAuth2 connection test requiring a saved database.
     """
 
     def __init__(self) -> None:
         super().__init__(
             SupersetError(
-                message="This database requires OAuth2 authentication. Please save the database first, then authorize in SQL Lab.",
+                message=(
+                    "This database requires OAuth2 authentication. Please save the "
+                    "database first, then authorize in SQL Lab."
+                ),
                 error_type=SupersetErrorType.OAUTH2_REQUIRES_SAVED_DATABASE,
                 level=ErrorLevel.WARNING,
                 extra={},
             )
         )
+
 
 class SupersetDisallowedSQLFunctionException(SupersetErrorException):
     """

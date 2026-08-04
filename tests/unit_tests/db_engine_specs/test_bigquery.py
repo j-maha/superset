@@ -1158,7 +1158,6 @@ def test_extended_dialect_keeps_oauth_token_out_of_url() -> None:
         assert client.call_args.kwargs["credentials"].token == "synthetic-token"  # noqa: S105
 
 
-
 def test_needs_oauth2_when_impersonation_token_is_missing(
     app_context: None,
 ) -> None:
