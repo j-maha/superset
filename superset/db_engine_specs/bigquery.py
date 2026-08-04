@@ -868,12 +868,7 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
                 ex = ex.args[0]
         if super().needs_oauth2(ex):
             return True
-        return (
-            dependencies_installed
-            and str(ex) == "An OAuth2 access token is required for impersonation"
-            and g
-            and hasattr(g, "user")
-        )
+        return str(ex) == "An OAuth2 access token is required for impersonation"
 
     @classmethod
     def _has_service_account_credentials(cls, database: Database) -> bool:

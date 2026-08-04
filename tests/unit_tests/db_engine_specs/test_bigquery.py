@@ -1174,6 +1174,16 @@ def test_needs_oauth2_when_impersonation_token_is_missing(
     )
 
 
+def test_needs_oauth2_without_user_context(app_context: None) -> None:
+    """Unsaved connection tests must classify missing impersonation tokens as OAuth."""
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    with mock.patch("superset.db_engine_specs.bigquery.dependencies_installed", False):
+        assert BigQueryEngineSpec.needs_oauth2(
+            ValueError("An OAuth2 access token is required for impersonation")
+        )
+
+
 def test_impersonate_user_selects_extended_driver() -> None:
     from superset.db_engine_specs.bigquery import BigQueryEngineSpec
 

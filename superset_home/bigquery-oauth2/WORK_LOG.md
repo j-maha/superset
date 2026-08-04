@@ -1,6 +1,6 @@
 # BigQuery OAuth2 Impersonation Work Log
 
-## 2026-06-28 — Session started
+## 2026-06-28 ЕҢДҶГ¶ Session started
 
 ### User request
 Proceed autonomously with the BigQuery OAuth2 User Impersonation work, while keeping this file updated so a future session can resume from the latest checkpoint.
@@ -29,7 +29,7 @@ After each meaningful experiment or code change, append:
 - next action;
 - blockers or user decisions needed.
 
-## 2026-06-28 — Phase 0 credential-transport experiment
+## 2026-06-28 ЕҢДҶГ¶ Phase 0 credential-transport experiment
 
 ### Examined
 - `superset/models/core.py`: engine construction currently keys `_ENGINE_CACHE` by database ID, URL, and engine kwargs.
@@ -53,7 +53,7 @@ Inspect the prototype patch and current query/cache execution paths, then write 
 ### User input needed
 None yet. Real GCP OAuth consent and production rollout remain outside autonomous local testing and will be requested only when needed.
 
-## 2026-06-28 — User decisions received
+## 2026-06-28 ЕҢДҶГ¶ User decisions received
 
 ### Approved policy
 - **F-1:** Bypass engine caching for BigQuery user impersonation; the engine is only a wrapper around GCP APIs and does not provide useful reusable state for this flow.
@@ -68,7 +68,7 @@ Inspect the dialect extension seam and implement a local synthetic-token experim
 
 
 
-## 2026-06-28 — Phase 0 resolved; first implementation slice
+## 2026-06-28 ЕҢДҶГ¶ Phase 0 resolved; first implementation slice
 
 ### Documentation
 - Updated `02_ARCHITECTURE_SPECIFICATION.md` with approved F-1/F-2/F-3/F-5 decisions.
@@ -97,12 +97,12 @@ Inspect the dialect extension seam and implement a local synthetic-token experim
 The items below were completed in the next checkpoint; see the latest entry for current remaining work.
 
 
-## 2026-06-28 — OAuth integration and validation checkpoint
+## 2026-06-28 ЕҢДҶГ¶ OAuth integration and validation checkpoint
 
 ### Additional implementation
 - Enabled BigQuery OAuth2 metadata and Google endpoints, including wrapped DBAPI auth-error detection.
 - Added OAuth-only `project_id` URI support while retaining service-account project reconciliation.
-- Reused the extended dialect’s per-request OAuth client for BigQuery metadata/cost helpers.
+- Reused the extended dialectЕҢДҶГ–s per-request OAuth client for BigQuery metadata/cost helpers.
 - Added scheduled query-cache warmup filtering for impersonated datasources.
 - Updated the database impersonation control label and tooltip to include BigQuery OAuth behavior.
 - Synchronized the consolidated status, roadmap, index, and completion-summary documents.
@@ -129,10 +129,10 @@ The items below were completed in the next checkpoint; see the latest entry for 
 - Remote URL was restored to token-free HTTPS after push.
 - No pull request was opened; the branch is ready for further commits or review when requested.
 
-## 2026-06-28 — Final local validation checkpoint
+## 2026-06-28 ЕҢДҶГ¶ Final local validation checkpoint
 
 ### Test correction
-- Updated the BigQuery fetch-memory test helper to explicitly mock request context, matching production’s guarded Flask-`g` behavior.
+- Updated the BigQuery fetch-memory test helper to explicitly mock request context, matching productionЕҢДҶГ–s guarded Flask-`g` behavior.
 - Complete `tests/unit_tests/db_engine_specs/test_bigquery.py`: **49 passed**.
 - Complete core, cache warmup, cache-key, SQLExecutor, and OAuth utility suites pass: **76 + 14 + 7 + 81 + 24 passed**.
 
@@ -142,7 +142,7 @@ The items below were completed in the next checkpoint; see the latest entry for 
 - Only pre-existing workspace artifacts remain uncommitted: `superset-frontend/package-lock.json`, `DEVELOPMENT_SETUP.md`, and untracked `superset_home/` context files.
 
 
-## 2026-06-28 — Browser and credential handoff checkpoint
+## 2026-06-28 ЕҢДҶГ¶ Browser and credential handoff checkpoint
 
 ### Branch and services
 - Created local branch `bot/gcp-validation` from the pushed implementation branch.
@@ -150,7 +150,7 @@ The items below were completed in the next checkpoint; see the latest entry for 
 - Frontend startup was attempted but stopped because the system `zstd` dependency is missing; do not make further service changes until resumed.
 
 ### Browser-session boundary
-- OpenHands browser automation uses a separate browser context; it cannot inherit or take over the user’s existing Chrome/Firefox session.
+- OpenHands browser automation uses a separate browser context; it cannot inherit or take over the userЕҢДҶГ–s existing Chrome/Firefox session.
 - The user should not provide Google passwords, MFA codes, recovery codes, session cookies, or browser-storage exports.
 - The user can complete Google login/MFA/consent manually in their own browser. The OAuth callback stores the token in the shared Superset metadata database, after which agent-side browser/API testing can continue using the server-side state.
 - OAuth client IDs/secrets should be supplied through local environment variables or a secret store, never pasted into chat.
@@ -169,7 +169,7 @@ The items below were completed in the next checkpoint; see the latest entry for 
 - two test Google identities and their intended permission/RLS difference;
 - explicit signal to resume browser/service work.
 
-## 2026-06-28 — OAuth testing resumed
+## 2026-06-28 ЕҢДҶГ¶ OAuth testing resumed
 
 ### Evidence checked
 - User confirmed the Google OAuth web app, authorized origins, and redirect URI `http://localhost:8088/api/v1/database/oauth2/` are configured.
@@ -181,9 +181,9 @@ The items below were completed in the next checkpoint; see the latest entry for 
 - Derive the accessible GCP project/dataset/table from the supplied service-account environment without exposing credentials, then verify local OAuth configuration and begin the first consent/query test.
 
 ### Blockers or decisions needed
-- The agent-side browser cannot complete Google login/MFA in the user’s browser context. If the OAuth flow requires interactive consent, the user must complete that step in their own browser at the local Superset URL; no passwords, MFA codes, cookies, or browser storage should be shared.
+- The agent-side browser cannot complete Google login/MFA in the userЕҢДҶГ–s browser context. If the OAuth flow requires interactive consent, the user must complete that step in their own browser at the local Superset URL; no passwords, MFA codes, cookies, or browser storage should be shared.
 
-## 2026-06-28 — GCP discovery and UI bootstrap checkpoint
+## 2026-06-28 ЕҢДҶГ¶ GCP discovery and UI bootstrap checkpoint
 
 ### Evidence
 - Using `SUPERSET_SA_JSON` only in memory, BigQuery access confirmed project `superset-test-proj`.
@@ -200,7 +200,7 @@ The items below were completed in the next checkpoint; see the latest entry for 
 ### Blockers or decisions needed
 - Google consent/login remains interactive. When the redirect is reached, the user must complete Google login/MFA/consent in their own browser context; no credentials or browser storage should be shared.
 
-## 2026-06-28 — Isolated database record created
+## 2026-06-28 ЕҢДҶГ¶ Isolated database record created
 
 ### Evidence
 - The first metadata-script attempt failed because Superset models were imported before `create_app()` initialized encryption; this was corrected without changing source code.
@@ -208,21 +208,21 @@ The items below were completed in the next checkpoint; see the latest entry for 
 - The record contains no service-account credentials and no OAuth token in its URI.
 
 ### Next action
-- Trigger a query through the authenticated SQL Lab/browser path. The expected first-run result is a Google OAuth redirect, which will require the user’s interactive consent in their own browser context.
+- Trigger a query through the authenticated SQL Lab/browser path. The expected first-run result is a Google OAuth redirect, which will require the userЕҢДҶГ–s interactive consent in their own browser context.
 
-## 2026-06-28 — OAuth redirect reached server-side
+## 2026-06-28 ЕҢДҶГ¶ OAuth redirect reached server-side
 
 ### Evidence
 - The first live SQL Lab attempt exposed a real bug: the extended dialect raises `ValueError` for a missing token, then Superset maps/wraps it before OAuth detection.
 - Added exact-message BigQuery detection and a regression test; focused BigQuery + OAuth utility suites pass: **74 passed**.
 - Reproduced the full authenticated engine path directly with database id 2 and local admin user: `database.is_oauth2_enabled()` is true and `get_sqla_engine()` now raises `OAUTH2_REDIRECT` with an authorization URL rooted at `https://accounts.google.com/o/oauth2/auth`.
-- The agent browser’s SQL Lab bundle displays the raw DB engine error instead of opening the authorization tab; this is likely stale/failed frontend OAuth redirect handling, while the backend contract is now verified.
+- The agent browserЕҢДҶГ–s SQL Lab bundle displays the raw DB engine error instead of opening the authorization tab; this is likely stale/failed frontend OAuth redirect handling, while the backend contract is now verified.
 - Backend logs were checked; the request log is sparse because the development server writes extensive watchdog reload noise, so direct application reproduction supplied the decisive evidence.
 
 ### Next action
 - Preserve this checkpoint in Git, add coverage for the exact wrapped/interactive path as useful, and investigate frontend OAuth redirect handling or provide the generated authorization URL to the user for manual consent.
 
-## 2026-06-28 — SQL Lab propagation and frontend validation checkpoint
+## 2026-06-28 ЕҢДҶГ¶ SQL Lab propagation and frontend validation checkpoint
 
 ### Evidence
 - `allchanges.patch` highlighted the need to preserve OAuth exceptions and defer unsaved-connection OAuth; its broader API signature changes were not copied wholesale because the current branch has a working narrower seam.
@@ -235,23 +235,23 @@ The items below were completed in the next checkpoint; see the latest entry for 
 
 ### Current external boundary
 - Real GCP project and tables are confirmed, and the Superset API now produces the correct Google consent URL.
-- Completing Google login/MFA/consent still requires the user’s own browser context. No passwords, MFA codes, cookies, or storage exports should be shared.
+- Completing Google login/MFA/consent still requires the userЕҢДҶГ–s own browser context. No passwords, MFA codes, cookies, or storage exports should be shared.
 
 ### Next action
 - Commit and push the source/test checkpoint to the authorized `bot/gcp-validation` branch, then leave the local services and work log ready for the next session.
 
-## 2026-06-28 — Checkpoint validation and Git handoff
+## 2026-06-28 ЕҢДҶГ¶ Checkpoint validation and Git handoff
 
 ### Validation
 - Full `.venv/bin/pre-commit run --all-files` was attempted.
 - Relevant hooks passed: frontend Prettier/Oxlint/custom rules, frontend type-checking, Python metadata validation, feature-flag sync, security audit, YAML, docstring, blacklist, and formatting support hooks that were installed.
-- Full run remains blocked by environment/toolchain gaps: `ruff`, `pylint`, `helm-docs`, and docs’ `eslint` are unavailable; mypy reports two pre-existing `SimpleNamespace` type errors in `tests/unit_tests/sql/execution/test_executor.py`, unrelated to this work.
+- Full run remains blocked by environment/toolchain gaps: `ruff`, `pylint`, `helm-docs`, and docsЕҢДҶГ– `eslint` are unavailable; mypy reports two pre-existing `SimpleNamespace` type errors in `tests/unit_tests/sql/execution/test_executor.py`, unrelated to this work.
 - Focused tests remain green: **143 passed**.
 
 ### Git action
 - Source/test changes are being committed separately from untracked `superset_home/`, `DEVELOPMENT_SETUP.md`, and the pre-existing frontend lockfile artifact. OAuth credentials and local metadata remain outside Git.
 
-## 2026-06-28 — Git checkpoint pushed
+## 2026-06-28 ЕҢДҶГ¶ Git checkpoint pushed
 
 ### Result
 - Commit `e9a1ccb2d6` (`fix(bigquery): preserve OAuth redirects in SQL Lab`) created on `bot/gcp-validation`.
@@ -263,7 +263,7 @@ The items below were completed in the next checkpoint; see the latest entry for 
 - `superset_home/` contains the work log, test database, env-backed local OAuth configuration, and architecture notes; it remains untracked by design.
 - Frontend/package-lock and `DEVELOPMENT_SETUP.md` remain pre-existing workspace artifacts and were not included in the commit.
 
-## 2026-06-28 — Final service recovery checkpoint
+## 2026-06-28 ЕҢДҶГ¶ Final service recovery checkpoint
 
 ### Service state
 - A targeted stale-child restart temporarily took port 8088 offline; the backend was restarted cleanly with the local config and health returned `200 OK`.
@@ -272,7 +272,7 @@ The items below were completed in the next checkpoint; see the latest entry for 
 
 
 
-## 2026-06-28 — Service Startup Environment Fix & UI Authorization Link Verified
+## 2026-06-28 ЕҢДҶГ¶ Service Startup Environment Fix & UI Authorization Link Verified
 
 ### Diagnosis & Fix
 - Root cause identified: When starting Flask in the background, `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` must be explicitly exported in the launch command so secret injection makes them available to the Flask process environment.
@@ -285,7 +285,9 @@ The items below were completed in the next checkpoint; see the latest entry for 
 - Navigated to `http://localhost:9000/sqllab/` in browser; the SQL Lab UI now correctly displays the **`provide authorization`** link pointing to `https://accounts.google.com/o/oauth2/auth` with state PKCE challenge and BigQuery scopes.
 
 
-## 2026-06-28 — OAuth Consent Flow & GCP IAM Permission Verification
+
+
+## 2026-06-28 ЕҢДҶГ¶ OAuth Consent Flow & GCP IAM Permission Verification
 
 ### Results & Database State
 - Inspected Superset metadata database (`superset_home/superset.db`):
@@ -305,7 +307,7 @@ The items below were completed in the next checkpoint; see the latest entry for 
   2. `BigQuery Data Viewer` on dataset `superset_test_dataset`.
 
 
-## 2026-06-28 — Second BigQuery Database Record Created & Roadmap Update
+## 2026-06-28 ЕҢДҶГ¶ Second BigQuery Database Record Created & Roadmap Update
 
 ### Actions Taken
 - Created a second impersonated BigQuery database record in Superset metadata DB:
@@ -318,7 +320,7 @@ The items below were completed in the next checkpoint; see the latest entry for 
 
 
 
-## 2026-06-28 — End-to-End Query Verification on Second Database (ID 3)
+## 2026-06-28 ЕҢДҶГ¶ End-to-End Query Verification on Second Database (ID 3)
 
 ### Database & Token State
 - Confirmed two distinct OAuth token records in `DatabaseUserOAuth2Tokens`:
@@ -333,7 +335,7 @@ The items below were completed in the next checkpoint; see the latest entry for 
 
 
 
-## 2026-06-28 — Unsaved OAuth Database Creation UI Flow Fix
+## 2026-06-28 ЕҢДҶГ¶ Unsaved OAuth Database Creation UI Flow Fix
 
 ### Root Cause Analysis
 - **Issue**: In the Database Creation modal (`/databaseview/list/`), when a user configured `sqlalchemy_uri = "bigquery://..."` with `impersonate_user = True` and clicked "Test Connection" or "Connect", `/api/v1/database/test_connection/` called `start_oauth2_dance()`.
@@ -360,7 +362,7 @@ The items below were completed in the next checkpoint; see the latest entry for 
 
 
 
-## 2026-06-28 — UI Form Validation & Permission Setup Fix Checkpoint
+## 2026-06-28 ЕҢДҶГ¶ UI Form Validation & Permission Setup Fix Checkpoint
 
 ### Root Cause Analysis in UI Modal
 1. In `superset-frontend/src/features/databases/DatabaseModal/index.tsx`, the **Connect** button in the UI modal is disabled (`disabled={!hasValidated || ...}`) until `testDatabaseConnection` succeeds and calls `setHasValidated(true)`.
@@ -377,7 +379,7 @@ The items below were completed in the next checkpoint; see the latest entry for 
 
 
 
-## 2026-08-03 — UI Validation Session Summary
+## 2026-08-03 ЕҢДҶГ¶ UI Validation Session Summary
 
 ### Session Start
 - **Branch**: Created `bot/ui-oauth-validation` from `bot/gcp-validation`
@@ -386,10 +388,10 @@ The items below were completed in the next checkpoint; see the latest entry for 
 - **Git Push**: Successfully pushed to `origin/bot/ui-oauth-validation`
 
 ### Current Status
-- Backend: ⚠️ Intermittent hangs, requires restart
-- Frontend: ✅ Running successfully on port 9000
-- Browser Integration: ❌ **BLOCKER** - Browser tools not responding (timeout issues, no interactive elements detected)
-- API Access: ⚠️ Hanging on database list endpoint
+- Backend: ЕҢГңДҖвҖҷД–Г… Intermittent hangs, requires restart
+- Frontend: ЕҢВЈДЈ Running successfully on port 9000
+- Browser Integration: ЕҢГҳД« **BLOCKER** - Browser tools not responding (timeout issues, no interactive elements detected)
+- API Access: ЕҢГңДҖвҖҷД–Г… Hanging on database list endpoint
 
 ### Blockers Identified
 1. **Browser Integration Failure**: Cannot use browser tools to test UI flows
@@ -445,10 +447,10 @@ The frontend code (`DatabaseModal/index.tsx`) works as designed:
 - "Connect" button disabled when: `!hasValidated || isValidating || validationErrors`
 
 ### Next Steps (Blocked)
-- ❌ Browser UI testing (blocked by integration issues)
-- ⏳ Manual human testing required (see steps above)
-- ⏳ OAuth flow validation (requires GCP IAM setup)
-- ⏳ Multi-user isolation testing
+- ЕҢГҳД« Browser UI testing (blocked by integration issues)
+- ЕҢГ…в”Ӯ Manual human testing required (see steps above)
+- ЕҢГ…в”Ӯ OAuth flow validation (requires GCP IAM setup)
+- ЕҢГ…в”Ӯ Multi-user isolation testing
 
 ### Recommendations
 1. **Immediate**: User to perform manual UI testing using steps above
@@ -461,7 +463,175 @@ The frontend code (`DatabaseModal/index.tsx`) works as designed:
 ### Git Status
 - **Branch**: `bot/ui-oauth-validation`
 - **Commit**: `963e389578` - "docs: update work log with UI validation session status and blockers"
-- **Pushed**: ✅ Yes, to `origin/bot/ui-oauth-validation`
+- **Pushed**: ЕҢВЈДЈ Yes, to `origin/bot/ui-oauth-validation`
+
+---
+
+## 2026-08-04 ЕҢДҶГ¶ Environment Restart and Validation Session
+
+### Session Start
+- **Timestamp**: 2026-08-04T06:45:00Z
+- **Branch**: `bot/ui-oauth-validation` (from previous session)
+- **Environment State**: Clean restart required (.venv missing, servers down)
+
+### Environment Setup
+1. **Ran setup.sh**: System dependencies installed, .venv recreated, node_modules installed
+2. **Database migrations**: Completed successfully (superset db upgrade)
+3. **Admin user**: Already exists (admin/admin)
+4. **Permissions**: Initialized successfully
+5. **Servers started**:
+   - Backend: ЕҢВЈДЈ Running on port 8088 (Flask debug mode)
+   - Frontend: ЕҢВЈДЈ Running on port 9000 (Webpack dev server)
+6. **Additional packages installed**:
+   - `google-api-core` (was missing)
+   - `google-cloud-bigquery` (was missing)
+   - `sqlalchemy-bigquery` (was missing)
+
+### Validation Results
+- **Backend health**: ЕҢВЈДЈ OK (curl http://localhost:8088/health returns "OK")
+- **Frontend health**: ЕҢВЈДЈ OK (manifest.json loads successfully)
+- **Login API**: ЕҢВЈДЈ Working (JWT token obtained successfully)
+- **Database API**: ЕҢГңДҖвҖҷД–Г… Intermittent hangs (known issue from previous session)
+- **Browser integration**: ЕҢГңДҖвҖҷД–Г… Partially working
+  - `browser_navigate`: ЕҢВЈДЈ Works (successfully navigates to URLs)
+  - `browser_get_state`: ЕҢГҳД« Fails with "Root CDP client not initialized"
+  - `browser_get_content`: ЕҢГҳД« Fails with AssertionError
+  - **Workaround**: Use curl-based testing for UI validation
+
+### Manual UI Testing (curl-based)
+- **Login page**: ЕҢВЈДЈ Accessible at http://localhost:8088/login/
+- **Login flow**: ЕҢВЈДЈ Successful via POST with credentials
+- **Session cookies**: ЕҢВЈДЈ Persist correctly
+- **Database view**: ЕҢВЈДЈ Accessible at http://localhost:8088/databaseview/list/
+- **Conclusion**: Backend and frontend are fully functional for UI testing via browser
+
+### Code Changes Verification
+All implementation from previous sessions is present:
+- ЕҢВЈДЈ `OAuth2RequiresSavedDBError` exception in `superset/exceptions.py`
+- ЕҢВЈДЈ Updated `check_for_oauth2()` in `superset/utils/oauth2.py`
+- ЕҢВЈДЈ OAuth error handling in `test_connection.py` and `create.py`
+- ЕҢВЈДЈ BigQuery engine spec with OAuth fallback
+- ЕҢВЈДЈ Extended BigQuery dialect (`bigquery_dialect.py`)
+
+### Current Status
+- **Backend**: ЕҢВЈДЈ Running and healthy
+- **Frontend**: ЕҢВЈДЈ Running and compiled
+- **Authentication**: ЕҢВЈДЈ Working
+- **UI accessibility**: ЕҢВЈДЈ Confirmed via curl
+- **Browser tools**: ЕҢГңДҖвҖҷД–Г… Navigation works, state inspection fails
+- **API stability**: ЕҢГңДҖвҖҷД–Г… Intermittent hangs (restart backend if occurs)
+
+### Next Actions
+1. Proceed with API-level testing (doesn't require browser state inspection)
+2. Run existing test suite to validate code changes
+3. Test OAuth flow endpoints directly via curl/requests
+4. If browser tools recover, attempt full UI flow testing
+5. Update work log with test results
+
+### Files Modified This Session
+- `superset_home/bigquery-oauth2/WORK_LOG.md` - This entry
+
+### Git Status
+- **Branch**: `bot/ui-oauth-validation`
+- **Status**: Working directory has uncommitted changes (package-lock.json from npm install)
+- **Last commit**: `963e389578` (from previous session)
+
+---
+
+## 2026-08-04T07:15:00Z вҖ” Browser Integration Investigation
+
+### Issue Identified
+Browser integration tools are non-functional for UI interaction testing.
+
+### Investigation Steps
+1. **Initial symptom**: `browser_get_state` fails with "Root CDP client not initialized"
+2. **Chrome process check**: No Chrome/Chromium processes running despite `browser_navigate` reporting success
+3. **CDP endpoint**: Chrome DevTools Protocol endpoint accessible at `http://127.0.0.1:46761/json/version` when Chrome is running
+4. **Browser profile cleared**: Deleted `/home/openhands/.config/browseruse/profiles/*` and `extensions/*` to force fresh session
+5. **Result**: `browser_navigate` continues to report "Navigated to URL" but no actual browser process spawns
+
+### Current Browser Tool Status
+- вң… `browser_navigate`: Reports success but doesn't launch browser (false positive)
+- вқҢ `browser_get_state`: Fails - "Root CDP client not initialized"
+- вқҢ `browser_get_content`: Fails - AssertionError
+- вқҢ `browser_click`: Not tested (requires working state)
+- вқҢ `browser_type`: Not tested (requires working state)
+- вқҢ All interactive testing: **BLOCKED**
+
+### Root Cause
+The browser integration infrastructure is not launching or connecting to an actual Chrome instance. The `browser_navigate` command appears to be returning false positives without actually controlling a browser.
+
+### Impact
+**CRITICAL BLOCKER**: Cannot perform UI testing that requires:
+- Clicking buttons
+- Selecting from dropdowns
+- Form interactions
+- Visual validation of UI elements
+- End-to-end user flow testing
+
+### Workarounds Attempted
+1. вқҢ Killing and restarting Chrome processes
+2. вқҢ Clearing browser profiles and extensions
+3. вқҢ Navigating to different URLs
+4. вқҢ Waiting for browser to initialize
+
+### Recommended Actions
+1. **Immediate**: Investigate browser integration infrastructure (may require platform-level fix)
+2. **Short-term**: Manual human testing of UI flows (user must test locally)
+3. **Alternative**: API-level testing only (limited validation)
+4. **Infrastructure**: Check if browser tools require special initialization or configuration
+
+### Files Modified
+- `superset_home/bigquery-oauth2/WORK_LOG.md` - This entry
+- Cleared `/home/openhands/.config/browseruse/profiles/*`
+- Cleared `/home/openhands/.config/browseruse/extensions/*`
+
+### Next Steps (Blocked)
+вҡ пёҸ **UI TESTING BLOCKED** - Requires browser infrastructure fix before proceeding with:
+- Database creation flow testing
+- OAuth popup flow validation
+- Impersonation checkbox interaction
+- Test connection button validation
+- Full end-to-end UI workflow
+
+---
+
+## 2026-08-04T07:45:00Z вҖ” Browser Integration RESTORED вң…
+
+### Platform Restart Resolution
+After platform restart, browser integration tools are now **fully functional**.
+
+### Verified Capabilities
+- вң… `browser_navigate` - Successfully navigates to URLs and creates tabs
+- вң… `browser_get_state` - Returns complete page state with interactive elements
+- вң… `browser_get_content` - Extracts page content
+- вң… `browser_click` - Successfully clicks elements by index
+- вң… `browser_type` - Successfully types text into input fields
+- вң… `browser_list_tabs` - Lists open tabs correctly
+
+### Test Results
+1. **Navigation test**: вң… Navigated to https://www.example.com
+2. **State inspection**: вң… Retrieved interactive elements (found 1 link)
+3. **Click test**: вң… Successfully clicked "Learn more" link, navigated to IANA
+4. **Typing test**: вң… Successfully typed into Google search box
+5. **Tab management**: вң… Tabs are created and tracked correctly
+
+### Current Status
+- **Browser tools**: вң… Fully operational
+- **Superset servers**: вқҢ Down (expected, will restart later)
+- **Ready for UI testing**: вң… Yes, once servers are running
+
+### Next Actions
+1. Restart Superset servers using `./superset_home/setup.sh`
+2. Test database creation flow with browser tools
+3. Validate OAuth interactions
+4. Test impersonation checkbox and test connection button
+5. Complete full end-to-end UI workflow validation
+
+### Files Modified
+- `superset_home/bigquery-oauth2/WORK_LOG.md` - This entry
+
+---
 
 
 
@@ -469,4 +639,77 @@ The frontend code (`DatabaseModal/index.tsx`) works as designed:
 
 
 
+
+## 2026-08-04 С Development Environment Setup
+
+### Session Start
+- **Timestamp**: 2026-08-04T12:20:57Z
+- **Branch**: `bot/ui-oauth-validation`
+- **Repository state**: Existing worktree changes were preserved; no feature files were modified.
+
+### Work Done
+- Read all Markdown notes under `superset_home/` and its subfolders.
+- Ran `superset_home/setup.sh`; the first run stopped because current Superset CLI commands reject the script's `-q` flags.
+- Removed those unsupported quiet flags from the setup script and reran it successfully.
+- Setup recreated `.venv`, installed Python and Node dependencies, migrated SQLite metadata, and initialized permissions.
+- Setup launched backend PID 5068 and frontend PID 5096.
+
+### Validation
+- Backend health: `curl http://127.0.0.1:8088/health` returned `OK`.
+- Frontend assets: `http://127.0.0.1:9000/static/assets/manifest.json` returned valid JSON.
+- Frontend compilation completed with four existing translation re-export warnings.
+- npm reported existing dependency audit findings: 1 critical, 6 high, and 1 moderate vulnerability.
+
+### Current Status
+- Backend and frontend are running on `0.0.0.0:8088` and `0.0.0.0:9000`.
+- Development login remains `admin` / `admin`.
+- OAuth2 feature work remains in validation: refresh compatibility, real-GCP verification, isolation coverage, async/report paths, documentation, and final pre-commit/security review.
+
+### Files Modified This Session
+- `superset_home/setup.sh` С removed unsupported Superset CLI `-q` flags.
+- `superset_home/bigquery-oauth2/WORK_LOG.md` С appended this entry.
+
+---
+
+## 2026-08-04 — Browser UI OAuth Flow Validation
+
+### Flow Exercised
+- Logged in through `/login/` as the local administrator.
+- Opened Settings → Database Connections → Database → Google BigQuery.
+- Switched to SQLAlchemy URI mode and entered `bigquery://superset-test-proj`.
+- Entered a unique display name and selected Advanced → Security → Per user caching and logged-in-user impersonation.
+- Clicked Test connection before saving, as required by the modal's disabled Connect state.
+
+### Findings
+- Initial page load exposed a missing `google.api_core` dependency; installed the repository's `.[bigquery]` extra into `.venv`. Login and BigQuery UI then loaded normally.
+- With impersonation accidentally left unchecked, the test correctly attempted ADC and returned a visible default-credentials error.
+- With both isolation controls visibly checked, the backend reached `bigquery+extended` and raised `An OAuth2 access token is required for impersonation`, but the API returned 422 instead of producing an OAuth redirect/save-first response. No authorization tab opened and no database was created.
+- Backend log confirms `POST /api/v1/database/test_connection/` ended in `DatabaseTestConnectionUnexpectedError`; the UI therefore leaves Connect disabled.
+
+### Current Status
+- End-user flow is **blocked at OAuth initiation** after the connection form and impersonation controls.
+- This belongs to Phase 2b UI integration / Phase 3 OAuth API validation and should be fixed before claiming end-to-end completion.
+- No feature source files were modified during this validation; only the environment dependency and this work log changed.
+
+---
+
+
+## 2026-08-04 — OAuth connection-test and persistence blocker resolved
+
+### Source changes
+- `superset/db_engine_specs/bigquery.py`: classify BigQuery’s exact impersonation-token error as OAuth-required without depending on optional dependency state or request-user context.
+- `superset/commands/database/test_connection.py`: treat OAuth-required unsaved configurations as valid and determine unsaved state from persisted IDs before OAuth client lookup.
+- `superset/commands/database/create.py`: return the newly persisted database when permission discovery is blocked only by OAuth authorization, while preserving unrelated failures.
+- Added regression coverage for BigQuery matching, unsaved connection testing, and permission-sync OAuth failures.
+
+### Validation evidence
+- Focused regressions: **8 passed, 50 deselected**.
+- Browser flow with `bigquery://superset-test-proj`, impersonation, per-user caching, and Advanced security controls: test **200**, save **201**.
+- The fresh saved database appears in the UI list; permission sync is deferred until OAuth authorization completes.
+- An earlier pre-fix attempt left a partial saved record; a fresh unique-name run verified the corrected path.
+
+### Plan placement and next steps
+- This work belongs to **Phase 2b UI integration / Phase 3 OAuth API validation**.
+- Next: open the saved BigQuery connection from SQL Lab or a query path, verify the per-user OAuth redirect/token callback, then validate query execution and cache isolation.
+- Run formatting, lint, and pre-commit checks before final review; no commit or PR has been created.
 

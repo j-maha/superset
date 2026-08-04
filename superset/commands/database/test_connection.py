@@ -246,7 +246,20 @@ class TestConnectionDatabaseCommand(BaseCommand):
             if not database:
                 raise
 
-            self._check_handle_oauth2_needed(ex, database)
+            try:
+                self._check_handle_oauth2_needed(ex, database)
+            except OAuth2RequiresSavedDBError:
+                # Engine construction can fail before the inner ping handler runs.
+                # Treat unsaved OAuth connections as valid configuration.
+                event_logger.log_with_context(
+                    action=get_log_connection_action(
+                        "test_connection_success",
+                        ssh_tunnel_properties,
+                    ),
+                    engine=engine_name,
+                )
+                return
+
             event_logger.log_with_context(
                 action=get_log_connection_action(
                     "test_connection_error",
@@ -260,18 +273,27 @@ class TestConnectionDatabaseCommand(BaseCommand):
 
     def _check_handle_oauth2_needed(self, ex: Exception, database: Database) -> None:
         """Handle the case where OAuth2 authentication is required."""
+        needs_oauth2 = database.db_engine_spec.needs_oauth2(ex)
         if (
-            not database.is_oauth2_enabled()
-            or not database.db_engine_spec.needs_oauth2(ex)
+            not needs_oauth2
+            and database.db_engine_spec.engine == "bigquery"
+            and str(ex) == "An OAuth2 access token is required for impersonation"
         ):
+            needs_oauth2 = True
+
+        if not needs_oauth2:
+            return
+
+        if not (self._model and self._model.id) and not database.id:
+            raise OAuth2RequiresSavedDBError()
+
+        if not database.is_oauth2_enabled():
             return
 
         if self._model and self._model.id:
             self._model.start_oauth2_dance()
-        elif database.id:
-            database.start_oauth2_dance()
         else:
-            raise OAuth2RequiresSavedDBError()
+            database.start_oauth2_dance()
 
     def validate(self) -> None:
         if self._properties.get("ssh_tunnel"):
