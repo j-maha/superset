@@ -774,6 +774,7 @@ export const testDatabaseConnection = (
   connection: Partial<DatabaseObject>,
   handleErrorMsg: (errorMsg: string) => void,
   addSuccessToast: (arg0: string) => void,
+  handleErrorType?: (errorType?: string) => void,
 ) => {
   SupersetClient.post({
     endpoint: 'api/v1/database/test_connection/',
@@ -785,7 +786,7 @@ export const testDatabaseConnection = (
     },
     createErrorHandler((errMsg: Record<string, string[] | string> | string) => {
       handleErrorMsg(t('ERROR: %s', parsedErrorMessage(errMsg)));
-    }),
+    }, handleErrorType),
   );
 };
 

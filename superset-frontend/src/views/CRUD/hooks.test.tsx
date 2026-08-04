@@ -50,6 +50,7 @@ beforeEach(() => {
 
 test('testDatabaseConnection reports OAuth authorization requirements', async () => {
   const handleErrorMsg = jest.fn();
+  const handleErrorType = jest.fn();
   const addSuccessToast = jest.fn();
   const response = new Response(
     JSON.stringify({
@@ -67,13 +68,16 @@ test('testDatabaseConnection reports OAuth authorization requirements', async ()
   );
   jest.spyOn(SupersetClient, 'post').mockRejectedValue({ response });
 
-  testDatabaseConnection({}, handleErrorMsg, addSuccessToast);
+  testDatabaseConnection({}, handleErrorMsg, addSuccessToast, handleErrorType);
 
   await waitFor(() => {
     expect(handleErrorMsg).toHaveBeenCalledWith(
       expect.stringContaining('requires OAuth2 authentication'),
     );
   });
+  expect(handleErrorType).toHaveBeenCalledWith(
+    'OAUTH2_REQUIRES_SAVED_DATABASE',
+  );
   expect(addSuccessToast).not.toHaveBeenCalled();
 });
 

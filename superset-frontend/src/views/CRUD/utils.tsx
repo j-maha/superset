@@ -323,11 +323,13 @@ export function createErrorHandler(
   handleErrorFunc: (
     errMsg?: string | Record<string, string[] | string>,
   ) => void,
+  handleErrorType?: (errorType?: string) => void,
 ) {
   return async (e: SupersetClientResponse | string) => {
     const parsedError = await getClientErrorObject(e);
     // Taking the first error returned from the API
     const errorsArray = parsedError?.errors;
+    handleErrorType?.(errorsArray?.[0]?.error_type);
     const config = await SupersetText;
     if (
       errorsArray?.length &&
