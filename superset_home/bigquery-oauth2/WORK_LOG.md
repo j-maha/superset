@@ -725,3 +725,17 @@ After platform restart, browser integration tools are now **fully functional**.
 - Removed the stale local token for database ID 3 and reran the saved query as admin.
 - SQL Lab now returns the OAuth authorization state and renders a Google `provide authorization` link with database ID, user ID, PKCE challenge, and no token in the URL.
 - Backend health remains `OK`; no feature source changes were needed on this continuation branch yet.
+
+
+## 2026-08-04 - User-authorized saved connection verified
+
+### Validation evidence
+- User completed OAuth for `2026-08-04T14:11:00Z Google BigQuery (UI test)` (database ID 12).
+- Admin token record exists with access and refresh tokens; the access token is currently valid.
+- A real query through `Database.get_raw_connection()` succeeded: `SELECT 1 AS oauth_probe` returned `0`.
+
+### Deferred UI issues
+- "Test connection" reports success without clearly demonstrating that a live connection was tested.
+- The authorization-needed popup disrupts the database-selection layout.
+- After OAuth callback, the stale authorization-needed popup remains until the user refreshes.
+- These are recorded for later and are intentionally not addressed in this task.
