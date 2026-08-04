@@ -739,3 +739,12 @@ After platform restart, browser integration tools are now **fully functional**.
 - The authorization-needed popup disrupts the database-selection layout.
 - After OAuth callback, the stale authorization-needed popup remains until the user refreshes.
 - These are recorded for later and are intentionally not addressed in this task.
+
+
+## 2026-08-04 - Refresh and cache isolation checkpoint
+
+- Existing OAuth refresh coverage passed, including expiration, lock re-query, refresh-token rotation, revoked-token handling, and transient failure behavior.
+- Existing per-user impersonation cache coverage passed; the real saved BigQuery query also succeeded with the authorized token.
+- Updated the cache-key regression to use typed `QueryOptions`, resolving its mypy errors.
+- Combined targeted validation: **93 passed, 77 deselected**.
+- Follow-up branch `bot/bigquery-oauth-saved-flow-followup` is pushed through commit `06f040e85c`.
