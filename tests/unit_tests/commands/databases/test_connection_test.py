@@ -20,7 +20,7 @@ from pytest_mock import MockerFixture
 
 from superset.commands.database.test_connection import TestConnectionDatabaseCommand
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
-from superset.exceptions import OAuth2RedirectError
+from superset.exceptions import OAuth2RedirectError, OAuth2RequiresSavedDBError
 
 
 def test_command(mocker: MockerFixture) -> None:
@@ -92,7 +92,7 @@ def test_command_with_oauth2(mocker: MockerFixture) -> None:
 
 
 def test_command_with_oauth2_unsaved_database(mocker: MockerFixture) -> None:
-    """Test that an unsaved OAuth2 connection is valid configuration."""
+    """Test strict and create-flow handling of unsaved OAuth2 connections."""
     user = mocker.MagicMock()
     user.email = "alice@example.org"
     mocker.patch("superset.db_engine_specs.gsheets.g", user=user)
@@ -117,4 +117,13 @@ def test_command_with_oauth2_unsaved_database(mocker: MockerFixture) -> None:
         "catalog": {"test": "https://example.org/"},
     }
     command = TestConnectionDatabaseCommand(properties)
-    command.run()
+    with pytest.raises(OAuth2RequiresSavedDBError) as excinfo:
+        command.run()
+    assert excinfo.value.error.error_type == (
+        SupersetErrorType.OAUTH2_REQUIRES_SAVED_DATABASE
+    )
+
+    TestConnectionDatabaseCommand(
+        properties,
+        allow_oauth2_requires_saved_db=True,
+    ).run()

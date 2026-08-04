@@ -70,7 +70,10 @@ class CreateDatabaseCommand(BaseCommand):
 
         try:
             # Test connection before starting create transaction
-            TestConnectionDatabaseCommand(self._properties).run()
+            TestConnectionDatabaseCommand(
+                self._properties,
+                allow_oauth2_requires_saved_db=True,
+            ).run()
         except (OAuth2RedirectError, OAuth2RequiresSavedDBError):
             # If we can't connect to the database due to an OAuth2 error we can still
             # save the database. Later, the user can sync permissions when setting up

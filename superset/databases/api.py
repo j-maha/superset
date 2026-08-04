@@ -117,6 +117,7 @@ from superset.exceptions import (
     DatabaseNotFoundException,
     InvalidPayloadSchemaError,
     OAuth2RedirectError,
+    OAuth2RequiresSavedDBError,
     SupersetErrorsException,
     SupersetException,
     SupersetSecurityException,
@@ -1321,6 +1322,8 @@ class DatabaseRestApi(BaseSupersetModelRestApi):
             SSHTunnelDatabasePortError,
             SSHTunnelHostKeyVerificationError,
         ) as ex:
+            return self.response_400(message=str(ex))
+        except OAuth2RequiresSavedDBError as ex:
             return self.response_400(message=str(ex))
 
     @expose("/<int:pk>/related_objects/", methods=("GET",))

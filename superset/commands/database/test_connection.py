@@ -66,9 +66,15 @@ class TestConnectionDatabaseCommand(BaseCommand):
     _model: Optional[Database] = None
     _context: dict[str, Any]
     _uri: str
+    _allow_oauth2_requires_saved_db: bool
 
-    def __init__(self, data: dict[str, Any]):
+    def __init__(
+        self,
+        data: dict[str, Any],
+        allow_oauth2_requires_saved_db: bool = False,
+    ):
         self._properties = data.copy()
+        self._allow_oauth2_requires_saved_db = allow_oauth2_requires_saved_db
 
         if (database_name := self._properties.get("database_name")) is not None:
             self._model = DatabaseDAO.get_database_by_name(database_name)
@@ -150,22 +156,24 @@ class TestConnectionDatabaseCommand(BaseCommand):
                             error_type=SupersetErrorType.CONNECTION_DATABASE_TIMEOUT,
                             message=(
                                 "Please check your connection details and database settings, "  # noqa: E501
-                                "and ensure that your database is accepting connections, "
-                                "then try connecting again."
+                                "and ensure that your database is accepting "
+                                "connections, then try connecting again."
                             ),
                             level=ErrorLevel.ERROR,
                             extra={"sqlalchemy_uri": database.sqlalchemy_uri},
                         ) from ex
                     except Exception as ex:  # pylint: disable=broad-except
-                        # If the connection failed because OAuth2 is needed, start the flow.
+                        # If the connection failed because OAuth2 is needed,
+                        # start the flow.
                         self._check_handle_oauth2_needed(ex, database)
 
                         alive = False
                         # So we stop losing the original message if any
                         ex_str = str(ex)
             except OAuth2RequiresSavedDBError:
-                # For an unsaved database requiring OAuth2, connection parameters are valid.
-                # Per-user OAuth authentication will occur in SQL Lab after saving.
+                if not self._allow_oauth2_requires_saved_db:
+                    raise
+                # Database creation can proceed before per-user OAuth authorization.
                 alive = True
 
             if not alive:
@@ -249,8 +257,9 @@ class TestConnectionDatabaseCommand(BaseCommand):
             try:
                 self._check_handle_oauth2_needed(ex, database)
             except OAuth2RequiresSavedDBError:
+                if not self._allow_oauth2_requires_saved_db:
+                    raise
                 # Engine construction can fail before the inner ping handler runs.
-                # Treat unsaved OAuth connections as valid configuration.
                 event_logger.log_with_context(
                     action=get_log_connection_action(
                         "test_connection_success",
