@@ -426,16 +426,16 @@ The following backend changes enable the UI flow:
 
 1. **`superset/exceptions.py`**: Added `OAuth2RequiresSavedDBError` exception
 2. **`superset/utils/oauth2.py`**: Updated `check_for_oauth2()` to check `database.id`
-3. **`superset/commands/database/test_connection.py`**: 
+3. **`superset/commands/database/test_connection.py`**:
    - Catches `OAuth2RequiresSavedDBError`
    - Returns HTTP 400 for unsaved databases (or HTTP 200 with `alive=True`)
-4. **`superset/commands/database/create.py`**: 
+4. **`superset/commands/database/create.py`**:
    - Catches `(OAuth2RedirectError, OAuth2RequiresSavedDBError)`
    - Allows database creation to proceed
-5. **`superset/db_engine_specs/bigquery.py`**: 
+5. **`superset/db_engine_specs/bigquery.py`**:
    - `get_catalog_names()` catches `OAuth2RedirectError`
    - Falls back to `{database.get_default_catalog()}`
-6. **`superset/utils/database.py`**: 
+6. **`superset/utils/database.py`**:
    - `add_permissions()` catches `OAuth2RedirectError`
    - Falls back gracefully during permission setup
 
@@ -713,3 +713,15 @@ After platform restart, browser integration tools are now **fully functional**.
 - Next: open the saved BigQuery connection from SQL Lab or a query path, verify the per-user OAuth redirect/token callback, then validate query execution and cache isolation.
 - Run formatting, lint, and pre-commit checks before final review; no commit or PR has been created.
 
+
+
+## 2026-08-04 — Saved SQL Lab OAuth authorization surfaced
+
+### Diagnosis
+- The saved BigQuery query initially returned a generic token error because the Flask reloader inherited an empty `DATABASE_OAUTH2_CLIENTS` map from its pre-OAuth parent process.
+- Restarting the backend with `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, and `SUPERSET_CONFIG_PATH` explicitly set restored OAuth enablement in the serving child.
+
+### Validation evidence
+- Removed the stale local token for database ID 3 and reran the saved query as admin.
+- SQL Lab now returns the OAuth authorization state and renders a Google `provide authorization` link with database ID, user ID, PKCE challenge, and no token in the URL.
+- Backend health remains `OK`; no feature source changes were needed on this continuation branch yet.
