@@ -748,3 +748,13 @@ After platform restart, browser integration tools are now **fully functional**.
 - Updated the cache-key regression to use typed `QueryOptions`, resolving its mypy errors.
 - Combined targeted validation: **93 passed, 77 deselected**.
 - Follow-up branch `bot/bigquery-oauth-saved-flow-followup` is pushed through commit `06f040e85c`.
+
+
+## 2026-08-04 - Crash recovery and OAuth redirect repair
+
+- Restarted the backend and frontend without reinstalling project dependencies.
+- Backend health is `OK` on port 8088; frontend webpack is serving on port 9000.
+- Frontend startup required a temporary `/tmp` `zstd` shim backed by the already-installed virtualenv codec; no repository files were changed for this workaround.
+- Recovered the uncommitted `OAuth2RequiresSavedDBError` definition and SQL Lab redirect-preservation changes.
+- Focused SQL Lab and BigQuery regressions passed: **68 passed**; applicable pre-commit hooks passed.
+- Pushed repair commit `cd53ba8ec0` to `bot/bigquery-oauth-saved-flow-followup`.
