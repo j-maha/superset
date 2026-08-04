@@ -20,6 +20,7 @@
 import * as reduxHooks from 'react-redux';
 import { Provider } from 'react-redux';
 import { createStore, Store } from 'redux';
+import { fireEvent } from '@testing-library/react';
 import { render, waitFor } from 'spec/helpers/testing-library';
 import { ErrorLevel, ErrorSource, ErrorTypeEnum } from '@superset-ui/core';
 import { reRunQuery } from 'src/SqlLab/actions/sqlLab';
@@ -152,6 +153,30 @@ describe('OAuth2RedirectMessage Component', () => {
     const linkElement = getByText(/provide authorization/i).closest('a');
     expect(linkElement).toHaveAttribute('href', 'https://example.com');
     expect(linkElement).toHaveAttribute('target', '_blank');
+  });
+
+  test('opens authorization in a script-created tab', () => {
+    const openSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
+    const { getByText } = render(setup());
+
+    fireEvent.click(getByText(/provide authorization/i));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://example.com/',
+      '_blank',
+      'noopener noreferrer',
+    );
+    openSpy.mockRestore();
+  });
+
+  test('hides the authorization alert after a matching callback', async () => {
+    const { queryByText } = render(setup());
+
+    simulateBroadcastMessage({ tabId: 'tabId' });
+
+    await waitFor(() => {
+      expect(queryByText(/provide authorization/i)).not.toBeInTheDocument();
+    });
   });
 
   test('closes the BroadcastChannel on unmount', () => {
