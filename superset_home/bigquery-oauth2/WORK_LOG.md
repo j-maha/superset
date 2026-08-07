@@ -853,3 +853,48 @@ After platform restart, browser integration tools are now **fully functional**.
 - This complements the earlier end-to-end query verification on database ID 12.
 - Prior refresh validation covered expired access tokens, refresh-token rotation, lock re-query, revoked-token handling, transient failures, and ORM persistence; it used local/synthetic credentials rather than forcing a live Google refresh.
 - Remaining feature validation is primarily multi-user token/cache isolation, async/background propagation, and final quality checks.
+
+
+## 2026-08-07 - PR-readiness follow-up on fresh branch
+
+### Git handoff
+- Committed the exact browser-flow checkpoint as `710d18da0f` and pushed `bot/bigquery-oauth-saved-flow-followup`.
+- Created local branch `bot/bigquery-oauth-pr-readiness` from that pushed checkpoint.
+
+### Opus review follow-up
+- Rechecked the deprecated Opus findings against current code.
+- F-1, F-2, F-3/F-4, and F-5 are implemented and covered; the consolidated status/index documents were stale and were refreshed locally.
+- F-7 does not reproduce in the current path: the transient connection-test object retains no persisted ID, and OAuth handoff uses the persisted model for existing databases.
+- Remaining rollout concerns are multi-user evidence and explicit headless/background report behavior; no runtime change was justified without a failing test or product decision.
+
+### New regression coverage
+- Added `test_existing_database_oauth_uses_persisted_model` to verify edit-flow OAuth starts on the persisted database and never assigns its ID to the transient test object.
+- Database command/API focused suite: **124 passed, 1 skipped**.
+
+### Next validation
+- Run pre-commit and the broader focused OAuth, BigQuery, cache, SQL Lab, and model suites.
+- Commit and push the follow-up branch if validation remains clean.
+
+
+## 2026-08-04 - Development environment and PR-readiness validation
+
+### Environment
+- Read the operational and BigQuery OAuth2 Markdown under `superset_home`; historical reference documents are deprecated and the consolidated spec is normative.
+- Ran `./superset_home/setup.sh` successfully. SQLite metadata migrations and permission initialization completed; existing admin user was preserved.
+- Backend is healthy at `http://127.0.0.1:8088/health` (`OK`); frontend manifest is served at port 9000.
+- Running services: Flask reloader parent PID 12451 with child 12492; webpack dev server shell PID 12505 with Node child 12506.
+- Setup emitted expected warnings: Node/npm engine mismatch (Node 22/npm 10 versus declared Node 24/npm 11), npm audit reports 10 vulnerabilities, and four existing translation export warnings from webpack.
+
+### Validation
+- Installed missing pinned local tools/dependencies: `ruff==0.9.7` and `trino==0.338.0`; no repository dependency files were changed by these installs.
+- Focused backend OAuth/BigQuery/cache/SQL Lab suite: **271 passed**.
+- Frontend OAuth/database suite: **59 passed**.
+- Pre-commit on the follow-up files: **all applicable hooks passed** after Ruff formatting.
+
+### Current status
+- Core BigQuery OAuth2 user-impersonation implementation and exact browser save flow remain verified.
+- The new persisted-model OAuth handoff regression is covered; transient test objects retain no database ID.
+- Remaining proposed work: add multi-user/headless evidence, settle report-owner token policy, and prepare PR review materials.
+
+### Git
+- Staged only `tests/unit_tests/commands/databases/test_connection_test.py` and this work log; unrelated setup files and `superset-frontend/package-lock.json` remain excluded.
