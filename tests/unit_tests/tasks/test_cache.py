@@ -17,6 +17,8 @@
 from typing import Any, Optional
 from unittest import mock
 
+from pytest_mock import MockerFixture
+
 
 def _fake_app(config: Optional[dict[str, Any]] = None) -> mock.MagicMock:
     """Build a stand-in for ``current_app`` with a controllable config dict."""
@@ -424,3 +426,38 @@ def test_warmup_predicate_detects_impersonated_database() -> None:
     )
 
     assert _uses_impersonated_database(task) is True
+
+
+def test_warmup_skips_impersonated_database_tasks(
+    mocker: MockerFixture,
+) -> None:
+    """Impersonated databases are not warmed for the shared cache user."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from superset.common.query_context import QueryContext
+    from superset.models.core import Database
+    from superset.tasks.cache import _warm_up_query_tasks, CacheWarmupTask
+
+    database = Database(
+        database_name="bigquery",
+        sqlalchemy_uri="sqlite://",
+        impersonate_user=True,
+    )
+    task = CacheWarmupTask(
+        query_context=cast(
+            QueryContext,
+            SimpleNamespace(datasource=SimpleNamespace(database=database)),
+        ),
+        dashboard_id=1,
+    )
+    strategy = mocker.MagicMock()
+    strategy.get_tasks.return_value = [task]
+    chart_data_command = mocker.patch(
+        "superset.commands.chart.data.get_data_command.ChartDataCommand"
+    )
+
+    result = _warm_up_query_tasks(strategy, mocker.MagicMock())
+
+    assert result == {"success": [], "errors": []}
+    chart_data_command.assert_not_called()
