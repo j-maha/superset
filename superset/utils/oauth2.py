@@ -321,5 +321,5 @@ def check_for_oauth2(database: Database) -> Iterator[None]:
             if database.id:
                 database.db_engine_spec.start_oauth2_dance(database)
             else:
-                raise OAuth2RequiresSavedDBError()
+                raise OAuth2RequiresSavedDBError() from ex
         raise
