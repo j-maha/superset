@@ -5123,7 +5123,7 @@
       "masked_encrypted_extra": false,
       "column_type_mapping": false,
       "function_names": false,
-      "user_impersonation": false,
+      "user_impersonation": true,
       "file_upload": true,
       "get_extra_table_metadata": true,
       "dbapi_exception_mapping": true,
