@@ -671,6 +671,7 @@ After platform restart, browser integration tools are now **fully functional**.
 
 ---
 
+
 ## 2026-08-04 — Browser UI OAuth Flow Validation
 
 ### Flow Exercised
@@ -769,3 +770,86 @@ After platform restart, browser integration tools are now **fully functional**.
 - Two unrelated engine-cache tests remain blocked by the unavailable `sqlalchemy.dialects:trino` plugin.
 - Applicable pre-commit hooks passed.
 - Pushed commit `9f33cb3317` to `bot/bigquery-oauth-saved-flow-followup`.
+
+
+## 2026-08-04 - Test connection OAuth messaging fix
+
+- Changed standalone database test-connection requests to report `OAuth2RequiresSavedDBError` instead of logging success for unsaved OAuth connections.
+- Kept database creation behavior unchanged through an explicit create-flow opt-in, allowing the database to be saved before SQL Lab authorization.
+- Added backend command/API and frontend error-path regressions.
+- Affected backend tests passed: **123 passed, 1 skipped**; frontend CRUD hooks tests passed: **31 passed**.
+- Applicable pre-commit hooks passed, including mypy, frontend type checking, Prettier, Ruff, and Pylint.
+- The integration API test remains unavailable because the environment lacks `flask_testing`; no dependency installation was performed.
+- Pushed commit `4a8da6e2c5` to `bot/bigquery-oauth-saved-flow-followup`.
+
+
+## 2026-08-04 - OAuth authorization popup lifecycle and layout
+
+- Authorization links now open through the sanctioned scripted new-window helper, allowing the callback page to close reliably instead of leaving a stale authorization tab.
+- Matching BroadcastChannel/storage callbacks now dismiss the originating OAuth alert after triggering the existing rerun/invalidation behavior.
+- Styled the callback fallback page as a responsive centered completion card for browsers that block `window.close()`.
+- Added popup-opening and callback-dismissal regressions; focused OAuth component suite passed: **12 passed**.
+- Applicable frontend pre-commit hooks passed, including Prettier, oxlint, custom rules, stylelint, and TypeScript checking.
+
+
+
+## 2026-08-04 - URI-dialog save-path regression follow-up
+
+- Reproduced the frontend failure: OAuth-required test errors cleared `hasValidated`, leaving the URI-dialog Connect button disabled.
+- Updated the shared database test-connection error handling to expose `error_type`; the modal now preserves save eligibility only for `OAUTH2_REQUIRES_SAVED_DATABASE`.
+- Added a frontend regression assertion for the OAuth error classification; focused CRUD hook suite passed: **31 passed**.
+- Focused frontend pre-commit hooks passed after Prettier auto-fix, including TypeScript checking, oxlint, and custom rules.
+- Development services were restarted; backend health is `OK` on 8088 and frontend responds on 9000.
+- Browser end-to-end save verification is pending because the local BigQuery test currently returns missing Application Default Credentials instead of the OAuth-required error.
+
+## 2026-08-07 - Browser investigation and OAuth detection finding
+
+- Reopened the live URI dialog and tested `bigquery://superset-test-proj` through the browser.
+- The active backend has the OAuth client configuration, but the connection test returned the generic Google ADC error: `Your default credentials were not found.`
+- Connect remained disabled, which is correct for the generic error but did not exercise the reported OAuth-required branch.
+- Focused backend regressions passed: command OAuth tests **2 passed** and database API OAuth tests **7 passed**.
+- The BigQuery `_get_client` path catches `DefaultCredentialsError` and raises `SupersetDBAPIConnectionError`, so `BigQueryEngineSpec.needs_oauth2()` cannot recognize that missing-ADC failure as an OAuth-required condition.
+- This is separate from the pushed frontend fix (`6b0b73c935`), which handles the explicit `OAUTH2_REQUIRES_SAVED_DATABASE` error type and preserves the Connect action only for that response.
+- Browser testing of the exact OAuth-required save flow remains pending; no credentials or tokens were exposed or persisted.
+
+
+## 2026-08-07 - Exact URI Advanced impersonation flow reproduced
+
+### Environment
+- Reran `superset_home/setup.sh` with OAuth client variables exported.
+- Backend health returned `OK` on port 8088; frontend responded on port 9000.
+- Interactive browser integration was restored after the framework restart.
+
+### Exact flow exercised
+1. Logged into the local Superset instance as `admin`.
+2. Opened Databases → Database → Google BigQuery.
+3. Switched to the SQLAlchemy URI form.
+4. Entered display name `BigQuery OAuth impersonation reproduction` and URI `bigquery://superset-test-proj`.
+5. Opened Advanced → Security and enabled `Impersonate logged in user`.
+6. Returned to Basic and clicked `Test connection`.
+
+### Findings
+- The backend returned the expected OAuth-required error toast: `This database requires OAuth2 authentication. Please save the database first, then authorize in SQL Lab.`
+- The URI form preserved the entered values and kept `Connect` enabled, confirming the frontend fix for `OAUTH2_REQUIRES_SAVED_DATABASE`.
+- Clicking `Connect` saved the database successfully; it appeared at the top of the database list.
+- Reopening the saved database confirmed the impersonation checkbox persisted as enabled.
+- In SQL Lab, selecting the saved database exposed the `provide authorization` link.
+- Opening the link reached Google’s OAuth sign-in page with BigQuery scope, localhost callback, database/user state, and PKCE parameters. No account credentials were entered and no OAuth token was exposed or persisted.
+
+### Current status
+- The reported URI + Advanced impersonation regression is reproduced and passes through the intended save-before-OAuth flow on commit `6b0b73c935`.
+- The remaining unverified step is completing OAuth consent with an authorized test account, which requires user-controlled external credentials.
+- No source files were changed in this session; only the local development database and this work log were affected by testing.
+
+### Proposed next actions
+1. Have the user complete Google OAuth consent in the open OAuth tab, if authorized, and verify the callback returns to SQL Lab.
+2. Run a minimal BigQuery query through the saved connection and verify token refresh/isolation behavior.
+3. Run the focused regression suites and inspect the final diff/status.
+
+
+## 2026-08-07 - User confirmed new authorized BigQuery query
+
+- User created `2026-08-07 11:04 Google BigQuery`, completed Google authorization, and confirmed the real query succeeded.
+- This complements the earlier end-to-end query verification on database ID 12.
+- Prior refresh validation covered expired access tokens, refresh-token rotation, lock re-query, revoked-token handling, transient failures, and ORM persistence; it used local/synthetic credentials rather than forcing a live Google refresh.
+- Remaining feature validation is primarily multi-user token/cache isolation, async/background propagation, and final quality checks.
