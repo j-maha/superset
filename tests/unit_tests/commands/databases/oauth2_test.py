@@ -25,7 +25,7 @@ from superset.commands.database.exceptions import DatabaseNotFoundError
 from superset.commands.database.oauth2 import OAuth2StoreTokenCommand
 from superset.daos.database import DatabaseUserOAuth2TokensDAO
 from superset.databases.schemas import OAuth2ProviderResponseSchema
-from superset.exceptions import OAuth2Error
+from superset.exceptions import OAuth2Error, OAuth2ScopeMismatchError
 from superset.models.core import Database
 from superset.utils.oauth2 import decode_oauth2_state, encode_oauth2_state
 
@@ -171,13 +171,14 @@ def test_run_rejects_callback_scope_without_provider_scope(
     mock_parameters: OAuth2ProviderResponseSchema,
 ) -> None:
     mock_database.db_engine_spec.get_oauth2_token.return_value["scope"] = None
+    mock_database.get_oauth2_config.return_value["scope_matching_policy"] = "subset"
     mock_parameters["scope"] = "callback-scope"
     mocker.patch.object(
         DatabaseUserOAuth2TokensDAO, "get_database", return_value=mock_database
     )
     mocker.patch("superset.utils.oauth2.decode_oauth2_state", return_value=mock_state)
 
-    with pytest.raises(OAuth2Error, match="Something went wrong while doing OAuth2"):
+    with pytest.raises(OAuth2ScopeMismatchError):
         OAuth2StoreTokenCommand(mock_parameters).run()
 
 
@@ -188,6 +189,7 @@ def test_run_rejects_missing_scope_without_deleting_existing_token(
     mock_parameters: OAuth2ProviderResponseSchema,
 ) -> None:
     mock_database.db_engine_spec.get_oauth2_token.return_value["scope"] = None
+    mock_database.get_oauth2_config.return_value["scope_matching_policy"] = "subset"
     existing_token = MagicMock()
     mocker.patch.object(
         DatabaseUserOAuth2TokensDAO, "get_database", return_value=mock_database
@@ -200,7 +202,7 @@ def test_run_rejects_missing_scope_without_deleting_existing_token(
     mock_delete = mocker.patch.object(DatabaseUserOAuth2TokensDAO, "delete")
     mocker.patch("superset.utils.oauth2.decode_oauth2_state", return_value=mock_state)
 
-    with pytest.raises(OAuth2Error, match="Something went wrong while doing OAuth2"):
+    with pytest.raises(OAuth2ScopeMismatchError):
         OAuth2StoreTokenCommand(mock_parameters).run()
 
     mock_delete.assert_not_called()

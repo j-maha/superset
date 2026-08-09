@@ -29,9 +29,11 @@ from pytest_mock import MockerFixture
 from sqlalchemy.orm import Session
 
 from superset.db_engine_specs.base import BaseEngineSpec
+from superset.exceptions import OAuth2ScopeMismatchError
 from superset.superset_typing import OAuth2ClientConfig, OAuth2TokenResponse
 from superset.utils.oauth2 import (
     _oauth2_scopes_match,
+    get_oauth2_scope_mismatch,
     decode_oauth2_state,
     encode_oauth2_state,
     generate_code_challenge,
@@ -66,6 +68,41 @@ def test_oauth2_scopes_match_exactly(
     requested: str | None, granted: str | None, matches: bool
 ) -> None:
     assert _oauth2_scopes_match(requested, granted) is matches
+
+
+@pytest.mark.parametrize(
+    ("policy", "granted", "matches"),
+    [
+        ("ignore", "scope-a scope-extra", True),
+        ("subset", "scope-a scope-extra", True),
+        ("subset", "scope-extra", False),
+        ("exact", "scope-a", True),
+        ("exact", "scope-a scope-extra", False),
+    ],
+)
+def test_oauth2_scope_matching_policy(
+    policy: str, granted: str, matches: bool
+) -> None:
+    config = cast(
+        OAuth2ClientConfig,
+        {
+            "scope": "scope-a",
+            "scope_matching_policy": policy,
+        },
+    )
+    mismatch = get_oauth2_scope_mismatch(config, granted)
+    assert (mismatch is None) is matches
+
+    if not matches:
+        assert mismatch == {
+            "policy": policy,
+            "required_scopes": ["scope-a"],
+            "granted_scopes": granted.split(),
+            "missing_scopes": [] if "scope-a" in granted.split() else ["scope-a"],
+            "unexpected_scopes": (
+                ["scope-extra"] if "scope-extra" in granted.split() else []
+            ),
+        }
 
 
 class LocalOAuth2EngineSpec(BaseEngineSpec):
@@ -214,7 +251,7 @@ def test_get_oauth2_access_token_base_no_refresh(mocker: MockerFixture) -> None:
     db.session.delete.assert_called_with(token)
 
 
-def test_get_oauth2_access_token_deletes_token_with_stale_scope(
+def test_get_oauth2_access_token_preserves_token_with_stale_scope(
     mocker: MockerFixture,
 ) -> None:
     db = mocker.patch("superset.utils.oauth2.db")
@@ -223,16 +260,19 @@ def test_get_oauth2_access_token_deletes_token_with_stale_scope(
     token.scope = "openid https://www.googleapis.com/auth/bigquery"
     db.session.query().filter_by().one_or_none.return_value = token
 
-    assert (
+    with pytest.raises(OAuth2ScopeMismatchError) as exc_info:
         get_oauth2_access_token(
-            {"scope": "openid https://www.googleapis.com/auth/bigquery.readonly"},
+            {
+                "scope": "openid https://www.googleapis.com/auth/bigquery.readonly",
+                "scope_matching_policy": "exact",
+            },
             1,
             1,
             db_engine_spec,
         )
-        is None
-    )
-    db.session.delete.assert_called_once_with(token)
+
+    assert "scope matching policy" in str(exc_info.value)
+    db.session.delete.assert_not_called()
 
 
 def test_refresh_oauth2_token_deletes_token_on_oauth2_exception(

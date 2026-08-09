@@ -1083,6 +1083,7 @@ def test_get_oauth2_config(app_context: None) -> None:
         "authorization_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/authorize",
         "token_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/token-request",
         "scope": "refresh_token session:role:USERADMIN",
+        "scope_matching_policy": "ignore",
         "redirect_uri": "http://example.com/api/v1/database/oauth2/",
         "request_content_type": "data",  # Default value from BaseEngineSpec
     }
@@ -1111,6 +1112,7 @@ def test_get_oauth2_config_token_request_type_from_db_engine_specs(
         "authorization_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/authorize",
         "token_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/token-request",
         "scope": "refresh_token session:role:USERADMIN",
+        "scope_matching_policy": "ignore",
         "redirect_uri": "http://example.com/api/v1/database/oauth2/",
         "request_content_type": "json",
     }
@@ -1139,6 +1141,7 @@ def test_get_oauth2_config_custom_token_request_type_extra(app_context: None) ->
         "authorization_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/authorize",
         "token_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/token-request",
         "scope": "refresh_token session:role:USERADMIN",
+        "scope_matching_policy": "ignore",
         "redirect_uri": "http://example.com/api/v1/database/oauth2/",
         "request_content_type": "json",
     }

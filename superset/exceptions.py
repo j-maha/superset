@@ -405,6 +405,39 @@ class OAuth2Error(SupersetErrorException):
         )
 
 
+class OAuth2ScopeMismatchError(SupersetErrorException):
+    """Raised when granted OAuth2 scopes do not satisfy the configured policy."""
+
+    status = 400
+
+    def __init__(
+        self,
+        *,
+        policy: str,
+        required_scopes: list[str],
+        granted_scopes: list[str],
+        missing_scopes: list[str],
+        unexpected_scopes: list[str],
+    ) -> None:
+        super().__init__(
+            SupersetError(
+                message=(
+                    "OAuth2 authorization completed, but the granted scopes do not "
+                    "satisfy the configured scope matching policy."
+                ),
+                error_type=SupersetErrorType.OAUTH2_SCOPE_MISMATCH,
+                level=ErrorLevel.ERROR,
+                extra={
+                    "policy": policy,
+                    "required_scopes": required_scopes,
+                    "granted_scopes": granted_scopes,
+                    "missing_scopes": missing_scopes,
+                    "unexpected_scopes": unexpected_scopes,
+                },
+            )
+        )
+
+
 class OAuth2RequiresSavedDBError(SupersetErrorException):
     """
     Exception for an OAuth2 connection test requiring a saved database.

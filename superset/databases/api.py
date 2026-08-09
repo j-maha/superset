@@ -118,6 +118,7 @@ from superset.exceptions import (
     InvalidPayloadSchemaError,
     OAuth2RedirectError,
     OAuth2RequiresSavedDBError,
+    OAuth2ScopeMismatchError,
     SupersetErrorsException,
     SupersetException,
     SupersetSecurityException,
@@ -1504,7 +1505,18 @@ class DatabaseRestApi(BaseSupersetModelRestApi):
         """
         parameters = OAuth2ProviderResponseSchema().load(request.args)
         command = OAuth2StoreTokenCommand(parameters)
-        command.run()
+        try:
+            command.run()
+        except OAuth2ScopeMismatchError as ex:
+            state = decode_oauth2_state(parameters["state"])
+            return make_response(
+                render_template(
+                    "superset/oauth2_scope_mismatch.html",
+                    tab_id=state["tab_id"],
+                    details=ex.error.extra or {},
+                ),
+                ex.status,
+            )
 
         state = decode_oauth2_state(parameters["state"])
         tab_id = state["tab_id"]

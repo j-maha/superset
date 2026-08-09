@@ -553,6 +553,10 @@ DATABASE_OAUTH2_CLIENTS = {
     },
 }
 
+
+# Optional scope validation for each client: "ignore" (default), "subset",
+# or "exact". Add "scope_matching_policy" to a client block.
+
 # OAuth2 redirect URI (adjust hostname/port for your setup)
 DATABASE_OAUTH2_REDIRECT_URI = "http://your-superset-host:port/api/v1/database/oauth2/"
 

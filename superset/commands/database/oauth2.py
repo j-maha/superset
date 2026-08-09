@@ -30,7 +30,7 @@ from superset.key_value.types import JsonKeyValueCodec, KeyValueResource
 from superset.models.core import Database, DatabaseUserOAuth2Tokens
 from superset.superset_typing import OAuth2State
 from superset.utils.decorators import on_error, transaction
-from superset.utils.oauth2 import decode_oauth2_state
+from superset.utils.oauth2 import decode_oauth2_state, raise_for_oauth2_scope_mismatch
 
 
 class OAuth2StoreTokenCommand(BaseCommand):
@@ -77,9 +77,10 @@ class OAuth2StoreTokenCommand(BaseCommand):
             code_verifier=code_verifier,
         )
 
-        granted_scope = token_response.get("scope")
-        if not granted_scope:
-            raise OAuth2Error("OAuth2 provider returned no usable scope")
+        raise_for_oauth2_scope_mismatch(
+            oauth2_config,
+            token_response.get("scope"),
+        )
 
         # delete old tokens
         if existing := DatabaseUserOAuth2TokensDAO.find_one_or_none(
@@ -97,7 +98,7 @@ class OAuth2StoreTokenCommand(BaseCommand):
                 "access_token": token_response["access_token"],
                 "access_token_expiration": expiration,
                 "refresh_token": token_response.get("refresh_token"),
-                "scope": granted_scope,
+                "scope": token_response.get("scope"),
             },
         )
 

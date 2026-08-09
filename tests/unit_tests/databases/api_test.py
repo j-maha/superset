@@ -42,6 +42,7 @@ from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
 from superset.exceptions import (
     OAuth2RedirectError,
     OAuth2RequiresSavedDBError,
+    OAuth2ScopeMismatchError,
     SupersetSecurityException,
 )
 from superset.sql.parse import Partition, Table
@@ -714,7 +715,7 @@ def test_oauth2_happy_path(
     mocker.patch.object(
         SqliteEngineSpec,
         "get_oauth2_config",
-        return_value={"id": "one", "secret": "two"},
+        return_value={"id": "one", "secret": "two", "scope": ""},
     )
     get_oauth2_token = mocker.patch.object(SqliteEngineSpec, "get_oauth2_token")
     get_oauth2_token.return_value = {
@@ -747,7 +748,7 @@ def test_oauth2_happy_path(
 
     assert response.status_code == 200
     get_oauth2_token.assert_called_with(
-        {"id": "one", "secret": "two"},
+        {"id": "one", "secret": "two", "scope": ""},
         "XXX",
         code_verifier=None,
     )
@@ -758,6 +759,47 @@ def test_oauth2_happy_path(
     assert token.access_token == "YYY"  # noqa: S105
     assert token.access_token_expiration == datetime(2024, 1, 1, 1, 0)
     assert token.refresh_token == "ZZZ"  # noqa: S105
+
+
+
+def test_oauth2_scope_mismatch_renders_popup(
+    mocker: MockerFixture,
+    client: Any,
+    full_api_access: None,
+) -> None:
+    state: OAuth2State = {
+        "user_id": 1,
+        "database_id": 1,
+        "tab_id": "42",
+        "default_redirect_uri": "http://localhost:8088/api/v1/oauth2/",
+    }
+    error = OAuth2ScopeMismatchError(
+        policy="exact",
+        required_scopes=["scope-a"],
+        granted_scopes=["scope-a", "scope-extra"],
+        missing_scopes=[],
+        unexpected_scopes=["scope-extra"],
+    )
+    mocker.patch(
+        "superset.databases.api.OAuth2StoreTokenCommand.run",
+        side_effect=error,
+    )
+    render_template = mocker.patch(
+        "superset.databases.api.render_template", return_value="popup"
+    )
+
+    response = client.get(
+        "/api/v1/database/oauth2/",
+        query_string={"state": encode_oauth2_state(state), "code": "XXX"},
+    )
+
+    assert response.status_code == 400
+    assert response.data == b"popup"
+    render_template.assert_called_once_with(
+        "superset/oauth2_scope_mismatch.html",
+        tab_id="42",
+        details=error.error.extra,
+    )
 
 
 def test_oauth2_permissions(
@@ -790,7 +832,7 @@ def test_oauth2_permissions(
     mocker.patch.object(
         SqliteEngineSpec,
         "get_oauth2_config",
-        return_value={"id": "one", "secret": "two"},
+        return_value={"id": "one", "secret": "two", "scope": ""},
     )
     get_oauth2_token = mocker.patch.object(SqliteEngineSpec, "get_oauth2_token")
     get_oauth2_token.return_value = {
@@ -823,7 +865,7 @@ def test_oauth2_permissions(
 
     assert response.status_code == 200
     get_oauth2_token.assert_called_with(
-        {"id": "one", "secret": "two"},
+        {"id": "one", "secret": "two", "scope": ""},
         "XXX",
         code_verifier=None,
     )
@@ -864,7 +906,7 @@ def test_oauth2_multiple_tokens(
     mocker.patch.object(
         SqliteEngineSpec,
         "get_oauth2_config",
-        return_value={"id": "one", "secret": "two"},
+        return_value={"id": "one", "secret": "two", "scope": ""},
     )
     get_oauth2_token = mocker.patch.object(SqliteEngineSpec, "get_oauth2_token")
     get_oauth2_token.side_effect = [

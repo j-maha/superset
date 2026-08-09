@@ -80,6 +80,7 @@ from superset.sql.parse import (
 )
 from superset.superset_typing import (
     OAuth2ClientConfig,
+    OAuth2ScopeMatchingPolicy,
     OAuth2State,
     OAuth2TokenResponse,
     ResultSetColumnType,
@@ -758,11 +759,23 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
 
         db_engine_spec_config = oauth2_config[cls.engine_name]
         redirect_uri = get_oauth2_redirect_uri()
+        scope_matching_policy = db_engine_spec_config.get(
+            "scope_matching_policy",
+            app.config["DATABASE_OAUTH2_SCOPE_MATCHING_POLICY"],
+        )
+        if scope_matching_policy not in {"ignore", "subset", "exact"}:
+            raise OAuth2Error(
+                "Invalid OAuth2 scope matching policy: "
+                f"{scope_matching_policy!r}"
+            )
 
         config: OAuth2ClientConfig = {
             "id": db_engine_spec_config["id"],
             "secret": db_engine_spec_config["secret"],
             "scope": db_engine_spec_config.get("scope") or cls.oauth2_scope,
+            "scope_matching_policy": cast(
+                OAuth2ScopeMatchingPolicy, scope_matching_policy
+            ),
             "redirect_uri": redirect_uri,
             "authorization_request_uri": db_engine_spec_config.get(
                 "authorization_request_uri",

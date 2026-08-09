@@ -37,6 +37,7 @@ from superset.exceptions import (
     AcquireDistributedLockFailedException,
     OAuth2Error,
     OAuth2RequiresSavedDBError,
+    OAuth2ScopeMismatchError,
 )
 from superset.superset_typing import OAuth2ClientConfig, OAuth2State
 
@@ -80,14 +81,61 @@ def generate_code_challenge(code_verifier: str) -> str:
     return code_challenge
 
 
-def _oauth2_scopes_match(requested: str | None, granted: str | None) -> bool:
-    """Return whether a token has exactly the configured OAuth2 scopes.
+def _oauth2_scope_set(scopes: str | None) -> frozenset[str]:
+    """Normalize a space-separated OAuth2 scope string for comparison."""
+    return frozenset((scopes or "").split())
 
-    Scope values are case-sensitive. Splitting on whitespace makes comparison
-    independent of ordering and repeated whitespace without treating distinct
-    scope values as equivalent.
-    """
-    return frozenset((requested or "").split()) == frozenset((granted or "").split())
+
+def _oauth2_scopes_match(requested: str | None, granted: str | None) -> bool:
+    """Return whether two OAuth2 scope strings contain the same scopes."""
+    return _oauth2_scope_set(requested) == _oauth2_scope_set(granted)
+
+
+def get_oauth2_scope_mismatch(
+    config: OAuth2ClientConfig,
+    granted_scope: str | None,
+) -> dict[str, Any] | None:
+    """Return scope mismatch details, or ``None`` when the policy is satisfied."""
+    policy = config.get(
+        "scope_matching_policy",
+        app.config["DATABASE_OAUTH2_SCOPE_MATCHING_POLICY"],
+    )
+    if policy not in {"ignore", "subset", "exact"}:
+        raise OAuth2Error(f"Invalid OAuth2 scope matching policy: {policy!r}")
+    if policy == "ignore":
+        return None
+
+    required = _oauth2_scope_set(config.get("scope"))
+    granted = _oauth2_scope_set(granted_scope)
+    missing = required - granted
+    unexpected = granted - required
+    if (policy == "subset" and not missing) or (
+        policy == "exact" and not missing and not unexpected
+    ):
+        return None
+
+    return {
+        "policy": policy,
+        "required_scopes": sorted(required),
+        "granted_scopes": sorted(granted),
+        "missing_scopes": sorted(missing),
+        "unexpected_scopes": sorted(unexpected),
+    }
+
+
+def raise_for_oauth2_scope_mismatch(
+    config: OAuth2ClientConfig,
+    granted_scope: str | None,
+) -> None:
+    """Raise a structured error when granted scopes violate the configured policy."""
+    if (mismatch := get_oauth2_scope_mismatch(config, granted_scope)):
+        raise OAuth2ScopeMismatchError(
+            policy=mismatch["policy"],
+            required_scopes=mismatch["required_scopes"],
+            granted_scopes=mismatch["granted_scopes"],
+            missing_scopes=mismatch["missing_scopes"],
+            unexpected_scopes=mismatch["unexpected_scopes"],
+        )
 
 
 @backoff.on_exception(
@@ -126,9 +174,7 @@ def get_oauth2_access_token(
     if token is None:
         return None
 
-    if not _oauth2_scopes_match(config.get("scope"), token.scope):
-        db.session.delete(token)
-        return None
+    raise_for_oauth2_scope_mismatch(config, token.scope)
 
     if token.access_token and datetime.now() < token.access_token_expiration:
         return token.access_token
@@ -314,6 +360,11 @@ class OAuth2ClientConfigSchema(Schema):
     id = fields.String(required=True)
     secret = fields.String(required=True)
     scope = fields.String(required=True)
+    scope_matching_policy = fields.String(
+        required=False,
+        load_default=lambda: app.config["DATABASE_OAUTH2_SCOPE_MATCHING_POLICY"],
+        validate=validate.OneOf(["ignore", "subset", "exact"]),
+    )
     redirect_uri = fields.String(
         required=False,
         load_default=get_oauth2_redirect_uri,

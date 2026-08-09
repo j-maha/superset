@@ -2542,6 +2542,10 @@ TEST_DATABASE_CONNECTION_TIMEOUT = timedelta(seconds=30)
 # when impersonated users need to run BigQuery write operations through Superset.
 BIGQUERY_IMPERSONATION_ALLOW_WRITE = False
 
+# By default, OAuth2 providers are not required to return scopes. Individual clients can
+# opt into subset or exact scope matching through DATABASE_OAUTH2_CLIENTS.
+DATABASE_OAUTH2_SCOPE_MATCHING_POLICY = "ignore"
+
 DATABASE_OAUTH2_CLIENTS: dict[str, dict[str, Any]] = {
     # "Google Sheets": {
     #     "id": "XXX.apps.googleusercontent.com",
