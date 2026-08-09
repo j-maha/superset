@@ -85,6 +85,26 @@ def test_query_bubbles_errors(mocker: MockerFixture) -> None:
         sqla_table.query(query_obj)
 
 
+def test_time_grain_metadata_omits_grains_until_oauth_authorization(
+    mocker: MockerFixture,
+) -> None:
+    """Explore metadata must load before a user authorizes the database."""
+    database = mocker.MagicMock()
+    database.grains.side_effect = OAuth2RedirectError(
+        url="http://example.com",
+        tab_id="1234",
+        redirect_uri="http://redirect.example.com",
+    )
+    sqla_table = SqlaTable(
+        table_name="my_sqla_table",
+        columns=[],
+        metrics=[],
+        database=database,
+    )
+
+    assert sqla_table.time_grain_sqla == []
+
+
 def _query_obj() -> QueryObjectDict:
     return {
         "granularity": None,
@@ -95,6 +115,26 @@ def _query_obj() -> QueryObjectDict:
         "is_timeseries": False,
         "filter": [],
     }
+
+
+def test_select_star_metadata_omits_query_until_oauth_authorization(
+    mocker: MockerFixture,
+) -> None:
+    """Explore metadata must not request a sample query before authorization."""
+    database = mocker.MagicMock()
+    database.select_star.side_effect = OAuth2RedirectError(
+        url="http://example.com",
+        tab_id="1234",
+        redirect_uri="http://redirect.example.com",
+    )
+    sqla_table = SqlaTable(
+        table_name="my_sqla_table",
+        columns=[],
+        metrics=[],
+        database=database,
+    )
+
+    assert sqla_table.select_star is None
 
 
 def _build_sqla_table_for_query(
