@@ -1252,3 +1252,22 @@ def test_impersonate_user_rejects_service_account_credentials() -> None:
             make_url("bigquery://demo-project"),
             {},
         )
+
+
+def test_impersonate_user_rejects_uri_service_account_credentials() -> None:
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.exceptions import SupersetException
+
+    database = mock.MagicMock()
+    database.get_encrypted_extra.return_value = {}
+
+    with pytest.raises(SupersetException, match="cannot be used together"):
+        BigQueryEngineSpec.impersonate_user(
+            database,
+            "alice",
+            "synthetic-token",
+            make_url(
+                "bigquery://demo-project?credentials_path=/tmp/service-account.json"
+            ),
+            {},
+        )

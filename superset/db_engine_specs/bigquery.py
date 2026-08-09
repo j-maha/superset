@@ -868,9 +868,19 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         )
 
     @classmethod
-    def _has_service_account_credentials(cls, database: Database) -> bool:
+    def _has_service_account_credentials(cls, database: Database, url: URL) -> bool:
         """Return whether explicit service-account credentials are configured."""
-        return bool(database.get_encrypted_extra().get("credentials_info"))
+        if database.get_encrypted_extra().get("credentials_info"):
+            return True
+
+        return any(
+            url.query.get(parameter)
+            for parameter in (
+                "credentials_path",
+                "credentials_info",
+                "credentials_base64",
+            )
+        )
 
     @classmethod
     def impersonate_user(
@@ -886,7 +896,7 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         ``Database.get_sqla_engine`` resolves a fresh access token before calling
         this method, refreshing the persisted OAuth token when necessary.
         """
-        if cls._has_service_account_credentials(database):
+        if cls._has_service_account_credentials(database, url):
             raise SupersetException(
                 "Service account credentials and user impersonation cannot be used "
                 "together. Remove the service account JSON to use OAuth2 impersonation."
