@@ -189,6 +189,27 @@ def test_get_oauth2_access_token_base_no_refresh(mocker: MockerFixture) -> None:
     db.session.delete.assert_called_with(token)
 
 
+def test_get_oauth2_access_token_deletes_token_with_stale_scope(
+    mocker: MockerFixture,
+) -> None:
+    db = mocker.patch("superset.utils.oauth2.db")
+    db_engine_spec = mocker.MagicMock()
+    token = mocker.MagicMock()
+    token.scope = "openid https://www.googleapis.com/auth/bigquery"
+    db.session.query().filter_by().one_or_none.return_value = token
+
+    assert (
+        get_oauth2_access_token(
+            {"scope": "openid https://www.googleapis.com/auth/bigquery.readonly"},
+            1,
+            1,
+            db_engine_spec,
+        )
+        is None
+    )
+    db.session.delete.assert_called_once_with(token)
+
+
 def test_refresh_oauth2_token_deletes_token_on_oauth2_exception(
     mocker: MockerFixture,
 ) -> None:

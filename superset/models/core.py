@@ -1413,9 +1413,14 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
                 client_config["request_content_type"] = (
                     self.db_engine_spec.oauth2_token_request_type
                 )
-            return cast(OAuth2ClientConfig, client_config)
+        else:
+            client_config = self.db_engine_spec.get_oauth2_config(self)
 
-        return self.db_engine_spec.get_oauth2_config()
+        if client_config:
+            client_config["scope"] = self.db_engine_spec.get_oauth2_scope(
+                self, client_config["scope"]
+            )
+        return cast(OAuth2ClientConfig, client_config) if client_config else None
 
     def start_oauth2_dance(self) -> None:
         """
@@ -1537,6 +1542,7 @@ class DatabaseUserOAuth2Tokens(Model, AuditMixinNullable):
     access_token = Column(encrypted_field_factory.create(Text), nullable=True)
     access_token_expiration = Column(DateTime, nullable=True)
     refresh_token = Column(encrypted_field_factory.create(Text), nullable=True)
+    scope = Column(Text, nullable=True)
 
 
 class Log(Model):  # pylint: disable=too-few-public-methods

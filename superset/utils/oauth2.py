@@ -80,6 +80,13 @@ def generate_code_challenge(code_verifier: str) -> str:
     return code_challenge
 
 
+def _oauth2_scopes_match(requested: str, granted: str | None) -> bool:
+    """Return whether a token grants all scopes required by the current config."""
+    if not granted:
+        return False
+    return set(requested.split()) <= set(granted.split())
+
+
 @backoff.on_exception(
     backoff.expo,
     AcquireDistributedLockFailedException,
@@ -114,6 +121,10 @@ def get_oauth2_access_token(
         .one_or_none()
     )
     if token is None:
+        return None
+
+    if config.get("scope") and not _oauth2_scopes_match(config["scope"], token.scope):
+        db.session.delete(token)
         return None
 
     if token.access_token and datetime.now() < token.access_token_expiration:
@@ -198,6 +209,8 @@ def refresh_oauth2_token(
         # Support single-use refresh tokens
         if new_refresh_token := token_response.get("refresh_token"):
             token.refresh_token = new_refresh_token
+        if new_scope := token_response.get("scope"):
+            token.scope = new_scope
 
         db.session.add(token)
 

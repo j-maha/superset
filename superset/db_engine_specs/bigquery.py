@@ -253,6 +253,7 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
 
     supports_oauth2 = True
     oauth2_scope = "openid https://www.googleapis.com/auth/bigquery"
+    oauth2_readonly_scope = "openid https://www.googleapis.com/auth/bigquery.readonly"
     oauth2_authorization_request_uri = "https://accounts.google.com/o/oauth2/auth"
     oauth2_token_request_uri = "https://oauth2.googleapis.com/token"  # noqa: S105
     oauth2_token_request_type = "data"  # noqa: S105
@@ -942,6 +943,15 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         return None
 
     @classmethod
+    def get_oauth2_scope(cls, database: Database, scope: str) -> str:
+        if (
+            database.impersonate_user
+            and not current_app.config["BIGQUERY_IMPERSONATION_ALLOW_WRITE"]
+        ):
+            return cls.oauth2_readonly_scope
+        return scope
+
+    @classmethod
     def get_allow_cost_estimate(cls, extra: dict[str, Any]) -> bool:
         return True
 
@@ -955,7 +965,11 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         Custom version that receives a client instead of a cursor.
         """
         job_config = bigquery.QueryJobConfig(dry_run=True)
-        query_job = client.query(statement, job_config=job_config)
+        query_job = client.query(
+            statement,
+            job_config=job_config,
+            api_method=bigquery.enums.QueryApiMethod.QUERY,
+        )
 
         # Format Bytes.
         # TODO: Humanize in case more db engine specs need to be added,
