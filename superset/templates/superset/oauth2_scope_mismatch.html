@@ -75,7 +75,10 @@ under the License.
         <dt>Unexpected scopes</dt>
         <dd>{{ details.get("unexpected_scopes", []) | join(", ") or "None" }}</dd>
       </dl>
-      <p class="hint">You can close this window and update the database OAuth2 configuration.</p>
+      <p class="hint">
+        You can close this window. If the problem persists, please contact your
+        Superset administrator to review the database OAuth2 configuration.
+      </p>
     </main>
   </body>
 </html>
