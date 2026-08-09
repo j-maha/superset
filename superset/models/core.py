@@ -90,6 +90,7 @@ from superset.utils.core import get_query_source_from_request, get_username
 from superset.utils.oauth2 import (
     check_for_oauth2,
     get_oauth2_access_token,
+    handle_oauth2_error,
     OAuth2ClientConfigSchema,
 )
 
@@ -1433,8 +1434,7 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
         If OAuth2 is enabled and the exception indicates that OAuth2 is needed,
         starts the OAuth2 dance.
         """
-        if self.is_oauth2_enabled() and self.db_engine_spec.needs_oauth2(ex):
-            self.start_oauth2_dance()
+        handle_oauth2_error(self, ex)
 
     def purge_oauth2_tokens(self) -> None:
         """

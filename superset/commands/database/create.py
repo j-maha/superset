@@ -49,6 +49,7 @@ from superset.exceptions import (
 from superset.extensions import event_logger
 from superset.models.core import Database
 from superset.utils.decorators import on_error, transaction
+from superset.utils.oauth2 import is_oauth2_required
 
 logger = logging.getLogger(__name__)
 stats_logger = app.config["STATS_LOGGER"]
@@ -116,7 +117,7 @@ class CreateDatabaseCommand(BaseCommand):
             # So we can show the original message
             raise
         except Exception as ex:
-            if database and database.db_engine_spec.needs_oauth2(ex):
+            if database and is_oauth2_required(database, ex):
                 logger.warning(
                     "Skipping permission sync for database '%s' until OAuth2 "
                     "authorization is completed.",

@@ -33,7 +33,11 @@ from werkzeug.routing import BuildError
 
 from superset import db
 from superset.distributed_lock import DistributedLock
-from superset.exceptions import AcquireDistributedLockFailedException, OAuth2Error
+from superset.exceptions import (
+    AcquireDistributedLockFailedException,
+    OAuth2Error,
+    OAuth2RequiresSavedDBError,
+)
 from superset.superset_typing import OAuth2ClientConfig, OAuth2State
 
 if TYPE_CHECKING:
@@ -307,20 +311,36 @@ class OAuth2ClientConfigSchema(Schema):
     )
 
 
+def is_oauth2_required(database: Database, ex: Exception) -> bool:
+    """Return whether a database error requires user OAuth2 authorization."""
+    return database.is_oauth2_enabled() and database.db_engine_spec.needs_oauth2(ex)
+
+
+def handle_oauth2_error(
+    database: Database,
+    ex: Exception,
+    oauth_database: Database | None = None,
+    require_saved_database: bool = False,
+) -> bool:
+    """Start OAuth2 or defer it until the database has been persisted."""
+    if not database.db_engine_spec.needs_oauth2(ex):
+        return False
+
+    target_database = oauth_database or database
+    if not database.is_oauth2_enabled() and not require_saved_database:
+        return False
+    if require_saved_database and not target_database.id:
+        raise OAuth2RequiresSavedDBError() from ex
+
+    target_database.start_oauth2_dance()
+    return True
+
+
 @contextmanager
 def check_for_oauth2(database: Database) -> Iterator[None]:
-    """
-    Run code and check if OAuth2 is needed.
-    """
-    from superset.exceptions import OAuth2RequiresSavedDBError
-
+    """Run code and start OAuth2 when the database requires authorization."""
     try:
         yield
     except Exception as ex:
-        if database.is_oauth2_enabled() and database.db_engine_spec.needs_oauth2(ex):
-            if database.id:
-                database.db_engine_spec.start_oauth2_dance(database)
-            else:
-                # OAuth state must reference a persisted database record.
-                raise OAuth2RequiresSavedDBError() from ex
+        handle_oauth2_error(database, ex, require_saved_database=True)
         raise

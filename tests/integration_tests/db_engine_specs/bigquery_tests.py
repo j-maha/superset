@@ -170,7 +170,7 @@ class TestBigQueryDbEngineSpec(SupersetTestCase):
         """
         DB Eng Specs (bigquery): Test DataFrame to SQL contract
         """
-        mock_get_client.return_value = "bigquery-client"
+        mock_get_client.return_value.__enter__.return_value = "bigquery-client"
         mock_get_engine.return_value.__enter__.return_value.url.host = "google-host"
 
         df = DataFrame()
