@@ -58,6 +58,8 @@ class ExtendedQueryDialect(BigQueryDialect):
         if self.oauth_token_provider is None:
             return super().create_connect_args(url)
 
+        # Impersonated engines should have a token, but the provider can still
+        # return none after a token is revoked or unavailable in a worker.
         oauth_token = self.oauth_token_provider()
         if not oauth_token:
             raise BigQueryOAuth2TokenRequiredError(

@@ -25,7 +25,7 @@ from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from datetime import datetime
 from re import Pattern
-from typing import Any, Callable, cast, TYPE_CHECKING, TypedDict
+from typing import Any, Callable, TYPE_CHECKING, TypedDict
 
 import pandas as pd
 from apispec import APISpec
@@ -231,6 +231,7 @@ class BigQueryParametersSchema(Schema):
 
 
 class BigQueryParametersType(TypedDict, total=False):
+    access_token: str | None
     credentials_info: dict[str, Any] | None
     project_id: str | None
     query: dict[str, Any]
@@ -1027,16 +1028,16 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         value = make_url_safe(uri)
         project_id = value.host or value.database
 
-        # Encrypted extras are persisted JSON; the schema validates their shape before
-        # this method is called, but static typing cannot infer that runtime contract.
-        return cast(
-            BigQueryParametersType,
-            {
-                **(encrypted_extra or {}),
-                "project_id": project_id,
-                "query": dict(value.query),
-            },
-        )
+        parameters: BigQueryParametersType = {
+            "project_id": project_id,
+            "query": dict(value.query),
+        }
+        if encrypted_extra:
+            if "access_token" in encrypted_extra:
+                parameters["access_token"] = encrypted_extra["access_token"]
+            if "credentials_info" in encrypted_extra:
+                parameters["credentials_info"] = encrypted_extra["credentials_info"]
+        return parameters
 
     @classmethod
     def get_dbapi_exception_mapping(cls) -> dict[type[Exception], type[Exception]]:
