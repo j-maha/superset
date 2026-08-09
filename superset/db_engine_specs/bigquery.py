@@ -21,6 +21,8 @@ import logging
 import re
 import sys
 import urllib
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from datetime import datetime
 from re import Pattern
 from typing import Any, Callable, cast, TYPE_CHECKING, TypedDict
@@ -66,12 +68,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 try:
-    import google.auth
     from google.auth.exceptions import GoogleAuthError
     from google.cloud import bigquery
     from google.cloud.bigquery import dbapi
     from google.cloud.exceptions import Unauthorized
-    from google.oauth2 import service_account
 
     dependencies_installed = True
 except ImportError:
@@ -637,14 +637,14 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         with cls.get_engine(
             database, catalog=table.catalog, schema=table.schema
         ) as engine:
-            client = cls._get_client(engine, database)
-            table_ref = f"{table.schema}.{table.table}"
-            if table.catalog:
-                table_ref = f"{table.catalog}.{table_ref}"
-            bq_table = client.get_table(table_ref)
+            with cls._get_client(engine, database) as client:
+                table_ref = f"{table.schema}.{table.table}"
+                if table.catalog:
+                    table_ref = f"{table.catalog}.{table_ref}"
+                bq_table = client.get_table(table_ref)
 
-            if bq_table.time_partitioning:
-                return bq_table.time_partitioning.field
+                if bq_table.time_partitioning:
+                    return bq_table.time_partitioning.field
         return None
 
     @classmethod
@@ -727,54 +727,41 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
             catalog=table.catalog,
             schema=table.schema,
         ) as engine:
-            to_gbq_kwargs = {
-                "destination_table": str(table),
-                "project_id": engine.url.host,
-                # Keep the client alive until pandas-gbq has submitted the upload.
-                "bigquery_client": cls._get_client(engine, database),
-            }
+            with cls._get_client(engine, database) as client:
+                to_gbq_kwargs = {
+                    "destination_table": str(table),
+                    "project_id": engine.url.host,
+                    "bigquery_client": client,
+                }
 
-            # Only pass through supported kwargs.
-            supported_kwarg_keys = {"if_exists"}
+                # Only pass through supported kwargs.
+                supported_kwarg_keys = {"if_exists"}
 
-            for key in supported_kwarg_keys:
-                if key in to_sql_kwargs:
-                    to_gbq_kwargs[key] = to_sql_kwargs[key]
+                for key in supported_kwarg_keys:
+                    if key in to_sql_kwargs:
+                        to_gbq_kwargs[key] = to_sql_kwargs[key]
 
-            pandas_gbq.to_gbq(df, **to_gbq_kwargs)
+                pandas_gbq.to_gbq(df, **to_gbq_kwargs)
 
     @classmethod
+    @contextmanager
     def _get_client(
         cls,
         engine: Engine,
         database: Database,  # pylint: disable=unused-argument
-    ) -> bigquery.Client:
-        """
-        Return the BigQuery client associated with an engine.
-        """
+    ) -> Iterator[bigquery.Client]:
+        """Yield the authenticated client owned by a SQLAlchemy engine."""
         if not dependencies_installed:
             raise SupersetException(
                 "Could not import libraries needed to connect to BigQuery."
             )
 
-        if "oauth_client" in vars(engine.dialect):
-            return engine.dialect.oauth_client
+        if oauth_client := getattr(engine.dialect, "oauth_client", None):
+            yield oauth_client
+            return
 
-        project: str | None = engine.url.host or None
-
-        if credentials_info := engine.dialect.credentials_info:
-            credentials = service_account.Credentials.from_service_account_info(
-                credentials_info
-            )
-            return bigquery.Client(credentials=credentials, project=project)
-
-        try:
-            credentials = google.auth.default()[0]
-            return bigquery.Client(credentials=credentials, project=project)
-        except google.auth.exceptions.DefaultCredentialsError as ex:
-            raise SupersetDBAPIConnectionError(
-                "The database credentials could not be found."
-            ) from ex
+        with closing(engine.raw_connection()) as connection:
+            yield connection.dbapi_connection._client  # pylint: disable=protected-access
 
     @classmethod
     def estimate_query_cost(  # pylint: disable=too-many-arguments
@@ -806,14 +793,14 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
             schema=schema,
             source=source,
         ) as engine:
-            client = cls._get_client(engine, database)
-            return [
-                cls.custom_estimate_statement_cost(
-                    cls.process_statement(statement, database),
-                    client,
-                )
-                for statement in parsed_script.statements
-            ]
+            with cls._get_client(engine, database) as client:
+                return [
+                    cls.custom_estimate_statement_cost(
+                        cls.process_statement(statement, database),
+                        client,
+                    )
+                    for statement in parsed_script.statements
+                ]
 
     @classmethod
     def get_default_catalog(cls, database: Database) -> str:
@@ -830,8 +817,8 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
             return project
 
         with database.get_sqla_engine() as engine:
-            client = cls._get_client(engine, database)
-            return client.project
+            with cls._get_client(engine, database) as client:
+                return client.project
 
     @classmethod
     def get_catalog_names(
@@ -846,9 +833,9 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         """
         try:
             with database.get_sqla_engine() as engine:
-                client = cls._get_client(engine, database)
-                projects = client.list_projects()
-                return {project.project_id for project in projects}
+                with cls._get_client(engine, database) as client:
+                    projects = client.list_projects()
+                    return {project.project_id for project in projects}
         except (SupersetDBAPIConnectionError, OAuth2RedirectError):
             logger.warning(
                 "Could not connect to database to get catalogs due to missing "

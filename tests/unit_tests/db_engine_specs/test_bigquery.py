@@ -436,7 +436,7 @@ def test_get_default_catalog(mocker: MockerFixture) -> None:
 
     mocker.patch.object(Database, "get_sqla_engine")
     get_client = mocker.patch.object(BigQueryEngineSpec, "_get_client")
-    get_client().project = "project"
+    get_client().__enter__.return_value.project = "project"
 
     database = Database(
         database_name="my_db",
@@ -457,76 +457,33 @@ def test_get_default_catalog(mocker: MockerFixture) -> None:
     assert BigQueryEngineSpec.get_default_catalog(database) == "project"
 
 
-@pytest.mark.parametrize(
-    ("sqlalchemy_uri", "schema", "expected_project"),
-    [
-        ("bigquery://uri-project", None, "uri-project"),
-        ("bigquery:///uri-project", None, "uri-project"),
-        ("bigquery://", "dataset_name", None),
-    ],
-)
-def test_get_client_resolves_uri_project_with_service_account_credentials(
-    mocker: MockerFixture,
-    sqlalchemy_uri: str,
-    schema: str | None,
-    expected_project: str | None,
-) -> None:
-    """Test that service-account clients use the project from the engine URI."""
+def test_get_client_reuses_engine_client() -> None:
     from superset.db_engine_specs.bigquery import BigQueryEngineSpec
 
-    credentials_info = {"project_id": "credential-project"}
-    credentials = mock.Mock()
-    engine = mock.MagicMock()
-    engine.url = BigQueryEngineSpec.adjust_engine_params(
-        make_url(sqlalchemy_uri), {}, schema=schema
-    )[0]
-    engine.dialect.credentials_info = credentials_info
-    create_credentials = mocker.patch(
-        "superset.db_engine_specs.bigquery.service_account.Credentials."
-        "from_service_account_info",
-        return_value=credentials,
-    )
-    client = mocker.patch("superset.db_engine_specs.bigquery.bigquery.Client")
+    client = mock.Mock()
+    connection = mock.MagicMock()
+    connection.dbapi_connection._client = client
+    engine = mock.Mock()
+    engine.dialect = mock.Mock(spec=[])
+    engine.raw_connection.return_value = connection
 
-    BigQueryEngineSpec._get_client(engine, mock.Mock())
+    with BigQueryEngineSpec._get_client(engine, mock.Mock()) as actual_client:
+        assert actual_client is client
 
-    create_credentials.assert_called_once_with(credentials_info)
-    client.assert_called_once_with(credentials=credentials, project=expected_project)
+    connection.close.assert_called_once_with()
 
 
-@pytest.mark.parametrize(
-    ("sqlalchemy_uri", "schema", "expected_project"),
-    [
-        ("bigquery://uri-project", None, "uri-project"),
-        ("bigquery:///uri-project", None, "uri-project"),
-        ("bigquery://", "dataset_name", None),
-    ],
-)
-def test_get_client_resolves_uri_project_with_application_default_credentials(
-    mocker: MockerFixture,
-    sqlalchemy_uri: str,
-    schema: str | None,
-    expected_project: str | None,
-) -> None:
-    """Test that ADC clients use the project from the engine URI."""
+def test_get_client_reuses_oauth_client_without_opening_connection() -> None:
     from superset.db_engine_specs.bigquery import BigQueryEngineSpec
 
-    credentials = mock.Mock()
-    engine = mock.MagicMock()
-    engine.url = BigQueryEngineSpec.adjust_engine_params(
-        make_url(sqlalchemy_uri), {}, schema=schema
-    )[0]
-    engine.dialect.credentials_info = None
-    get_default_credentials = mocker.patch(
-        "superset.db_engine_specs.bigquery.google.auth.default",
-        return_value=(credentials, "credential-project"),
-    )
-    client = mocker.patch("superset.db_engine_specs.bigquery.bigquery.Client")
+    client = mock.Mock()
+    engine = mock.Mock()
+    engine.dialect.oauth_client = client
 
-    BigQueryEngineSpec._get_client(engine, mock.Mock())
+    with BigQueryEngineSpec._get_client(engine, mock.Mock()) as actual_client:
+        assert actual_client is client
 
-    get_default_credentials.assert_called_once_with()
-    client.assert_called_once_with(credentials=credentials, project=expected_project)
+    engine.raw_connection.assert_not_called()
 
 
 def test_df_to_sql_passes_oauth_client_to_pandas_gbq(
@@ -577,7 +534,12 @@ def test_get_time_partition_column_uses_catalog_in_table_reference(
     engine = mock.MagicMock()
     get_engine = mocker.patch.object(BigQueryEngineSpec, "get_engine")
     get_engine.return_value.__enter__.return_value = engine
-    client = mocker.patch.object(BigQueryEngineSpec, "_get_client").return_value
+    client = mock.Mock()
+    mock_client_context = mocker.patch.object(
+        BigQueryEngineSpec,
+        "_get_client",
+    ).return_value
+    mock_client_context.__enter__.return_value = client
     client.get_table.return_value.time_partitioning.field = "ds"
 
     result = BigQueryEngineSpec.get_time_partition_column(

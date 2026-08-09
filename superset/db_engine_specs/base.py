@@ -95,6 +95,7 @@ from superset.utils.oauth2 import (
     generate_code_challenge,
     generate_code_verifier,
     get_oauth2_redirect_uri,
+    handle_oauth2_error,
 )
 
 if TYPE_CHECKING:
@@ -2219,8 +2220,7 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
         try:
             cursor.execute(query)
         except Exception as ex:
-            if database.is_oauth2_enabled() and cls.needs_oauth2(ex):
-                cls.start_oauth2_dance(database)
+            handle_oauth2_error(database, ex)
             raise cls.get_dbapi_mapped_exception(ex) from ex
 
     @classmethod
