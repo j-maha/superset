@@ -995,12 +995,9 @@ def test_get_oauth2_token_without_pkce(mocker: MockerFixture) -> None:
 
 
 @with_config({"DATABASE_OAUTH2_TIMEOUT": timedelta(seconds=30)})
-def test_get_oauth2_token_normalizes_scope_for_opt_in_provider(
+def test_get_oauth2_token_preserves_optional_scope_compatibility(
     mocker: MockerFixture,
 ) -> None:
-    class ProviderEngineSpec(BaseEngineSpec):
-        oauth2_token_response_scope_optional = True
-
     mock_post = mocker.patch("superset.db_engine_specs.base.requests.post")
     mock_post.return_value.json.return_value = {
         "access_token": "test-access-token",  # noqa: S105
@@ -1016,9 +1013,16 @@ def test_get_oauth2_token_normalizes_scope_for_opt_in_provider(
         "request_content_type": "json",
     }
 
-    result = ProviderEngineSpec.get_oauth2_token(config, "auth-code")
+    result = BaseEngineSpec.get_oauth2_token(config, "auth-code")
 
     assert result["scope"] == "read write"
+
+    class StrictProviderEngineSpec(BaseEngineSpec):
+        oauth2_token_response_scope_optional = False
+
+    strict_result = StrictProviderEngineSpec.get_oauth2_token(config, "auth-code")
+
+    assert "scope" not in strict_result
 
 
 @with_config({"DATABASE_OAUTH2_TIMEOUT": timedelta(seconds=30)})

@@ -616,12 +616,17 @@ class SqlLabRestApi(BaseSupersetApi):
     ) -> SqlJsonExecutor:
         sql_json_executor: SqlJsonExecutor
         if execution_context.is_run_asynchronous():
-            sql_json_executor = ASynchronousSqlJsonExecutor(query_dao, get_sql_results)
+            sql_json_executor = ASynchronousSqlJsonExecutor(
+                query_dao,
+                get_sql_results,
+                request.url_root,
+            )
         else:
             sql_json_executor = SynchronousSqlJsonExecutor(
                 query_dao,
                 get_sql_results,
                 app.config.get("SQLLAB_TIMEOUT"),
                 is_feature_enabled("SQLLAB_BACKEND_PERSISTENCE"),
+                request.url_root,
             )
         return sql_json_executor

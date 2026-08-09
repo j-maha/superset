@@ -253,7 +253,7 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
 
     supports_oauth2 = True
     oauth2_scope = "openid https://www.googleapis.com/auth/bigquery"
-    oauth2_token_response_scope_optional = True
+    oauth2_token_response_scope_optional = False
     oauth2_readonly_scope = "openid https://www.googleapis.com/auth/bigquery.readonly"
     oauth2_authorization_request_uri = "https://accounts.google.com/o/oauth2/auth"
     oauth2_token_request_uri = "https://oauth2.googleapis.com/token"  # noqa: S105

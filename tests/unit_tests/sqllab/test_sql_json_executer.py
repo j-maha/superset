@@ -20,7 +20,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from superset.exceptions import OAuth2RedirectError, SupersetErrorsException
-from superset.sqllab.sql_json_executer import SynchronousSqlJsonExecutor
+from superset.sqllab.sql_json_executer import (
+    ASynchronousSqlJsonExecutor,
+    SynchronousSqlJsonExecutor,
+)
 from superset.utils.core import QueryStatus
 
 
@@ -86,6 +89,43 @@ def test_execute_uses_persisted_query_user_for_task(monkeypatch: Any) -> None:
     executor.execute(execution_context, "SELECT 1", None)
 
     assert get_sql_results_task.call_args.kwargs["username"] == "alice"
+
+
+def test_execute_forwards_public_base_url_to_task() -> None:
+    """Preserve the public URL when SQL Lab executes through a task."""
+    query_dao = MagicMock()
+    get_sql_results_task = MagicMock(return_value={"status": QueryStatus.SUCCESS})
+    executor = SynchronousSqlJsonExecutor(
+        query_dao,
+        get_sql_results_task,
+        timeout_duration_in_seconds=60,
+        sqllab_backend_persistence_feature_enable=False,
+        base_url="https://superset.example/",
+    )
+
+    executor.execute(_make_execution_context(), "SELECT 1", None)
+
+    assert get_sql_results_task.call_args.kwargs["base_url"] == (
+        "https://superset.example/"
+    )
+
+
+def test_async_execute_forwards_public_base_url_to_task() -> None:
+    """Preserve the public URL when SQL Lab uses a Celery worker."""
+    query_dao = MagicMock()
+    get_sql_results_task = MagicMock()
+    get_sql_results_task.delay.return_value = MagicMock()
+    executor = ASynchronousSqlJsonExecutor(
+        query_dao,
+        get_sql_results_task,
+        base_url="https://superset.example/",
+    )
+
+    executor.execute(_make_execution_context(), "SELECT 1", None)
+
+    assert get_sql_results_task.delay.call_args.kwargs["base_url"] == (
+        "https://superset.example/"
+    )
 
 
 def test_execute_raises_400_when_all_errors_are_warnings() -> None:

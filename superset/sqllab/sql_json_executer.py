@@ -64,9 +64,15 @@ class SqlJsonExecutorBase(SqlJsonExecutor, ABC):
     _query_dao: QueryDAO
     _get_sql_results_task: GetSqlResultsTask
 
-    def __init__(self, query_dao: QueryDAO, get_sql_results_task: GetSqlResultsTask):
+    def __init__(
+        self,
+        query_dao: QueryDAO,
+        get_sql_results_task: GetSqlResultsTask,
+        base_url: str | None = None,
+    ):
         self._query_dao = query_dao
         self._get_sql_results_task = get_sql_results_task
+        self._base_url = base_url
 
     @staticmethod
     def _get_query_username(execution_context: SqlJsonExecutionContext) -> str | None:
@@ -89,8 +95,9 @@ class SynchronousSqlJsonExecutor(SqlJsonExecutorBase):
         get_sql_results_task: GetSqlResultsTask,
         timeout_duration_in_seconds: int,
         sqllab_backend_persistence_feature_enable: bool,
+        base_url: str | None = None,
     ):
-        super().__init__(query_dao, get_sql_results_task)
+        super().__init__(query_dao, get_sql_results_task, base_url)
         self._timeout_duration_in_seconds = timeout_duration_in_seconds
         self._sqllab_backend_persistence_feature_enable = (
             sqllab_backend_persistence_feature_enable
@@ -157,6 +164,7 @@ class SynchronousSqlJsonExecutor(SqlJsonExecutorBase):
             username=self._get_query_username(execution_context),
             expand_data=execution_context.expand_data,
             log_params=log_params,
+            base_url=self._base_url,
         )
 
     def _is_store_results(self, execution_context: SqlJsonExecutionContext) -> bool:
@@ -191,6 +199,7 @@ class ASynchronousSqlJsonExecutor(SqlJsonExecutorBase):
                 start_time=now_as_float(),
                 expand_data=execution_context.expand_data,
                 log_params=log_params,
+                base_url=self._base_url,
             )
             try:
                 task.forget()

@@ -602,8 +602,8 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
     supports_oauth2 = False
     oauth2_scope = ""
     # Providers may omit scope from the token response when it matches the request.
-    # Engine specs must opt in when that provider behavior is documented.
-    oauth2_token_response_scope_optional = False
+    # Engine specs can opt out when the provider documents a scope response.
+    oauth2_token_response_scope_optional = True
     oauth2_authorization_request_uri: str | None = None  # pylint: disable=invalid-name
     oauth2_token_request_uri: str | None = None
     oauth2_token_request_type = "data"  # noqa: S105

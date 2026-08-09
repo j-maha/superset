@@ -442,14 +442,20 @@ def test_get_sql_results_oauth2(mocker: MockerFixture, app) -> None:
     mocker.patch("superset.sql_lab.get_query", return_value=query)
 
     with pytest.raises(OAuth2RedirectError) as excinfo:
-        get_sql_results(query_id=1, rendered_query="SELECT 1")
+        get_sql_results(
+            query_id=1,
+            rendered_query="SELECT 1",
+            base_url="http://localhost:8088/",
+        )
 
     error = excinfo.value.error
     assert error.message == "You don't have permission to access the data."
     assert error.error_type == SupersetErrorType.OAUTH2_REDIRECT
     assert error.level == ErrorLevel.WARNING
     assert error.extra["tab_id"] == "fb11f528-6eba-4a8a-837e-6b0d39ee9187"
-    assert error.extra["redirect_uri"] == "http://localhost/api/v1/database/oauth2/"
+    assert error.extra["redirect_uri"] == (
+        "http://localhost:8088/api/v1/database/oauth2/"
+    )
 
     # Parse the OAuth2 authorization URL and verify components individually,
     # since the JWT state and PKCE code_challenge are computed deterministically
@@ -462,7 +468,9 @@ def test_get_sql_results_oauth2(mocker: MockerFixture, app) -> None:
     params = parse_qs(url.query)
     assert params["scope"] == ["refresh_token session:role:USERADMIN"]
     assert params["response_type"] == ["code"]
-    assert params["redirect_uri"] == ["http://localhost/api/v1/database/oauth2/"]
+    assert params["redirect_uri"] == [
+        "http://localhost:8088/api/v1/database/oauth2/"
+    ]
     assert params["client_id"] == ["my_client_id"]
     assert params["code_challenge_method"] == ["S256"]
 
