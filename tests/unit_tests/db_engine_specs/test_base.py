@@ -995,6 +995,33 @@ def test_get_oauth2_token_without_pkce(mocker: MockerFixture) -> None:
 
 
 @with_config({"DATABASE_OAUTH2_TIMEOUT": timedelta(seconds=30)})
+def test_get_oauth2_token_normalizes_scope_for_opt_in_provider(
+    mocker: MockerFixture,
+) -> None:
+    class ProviderEngineSpec(BaseEngineSpec):
+        oauth2_scope_omitted_means_requested = True
+
+    mock_post = mocker.patch("superset.db_engine_specs.base.requests.post")
+    mock_post.return_value.json.return_value = {
+        "access_token": "test-access-token",  # noqa: S105
+        "expires_in": 3600,
+    }
+    config: OAuth2ClientConfig = {
+        "id": "client-id",
+        "secret": "client-secret",
+        "scope": "read write",
+        "redirect_uri": "http://localhost:8088/api/v1/database/oauth2/",
+        "authorization_request_uri": "https://oauth.example.com/authorize",
+        "token_request_uri": "https://oauth.example.com/token",
+        "request_content_type": "json",
+    }
+
+    result = ProviderEngineSpec.get_oauth2_token(config, "auth-code")
+
+    assert result["scope"] == "read write"
+
+
+@with_config({"DATABASE_OAUTH2_TIMEOUT": timedelta(seconds=30)})
 def test_get_oauth2_token_with_pkce(mocker: MockerFixture) -> None:
     """
     Test BaseEngineSpec.get_oauth2_token includes code_verifier when provided.

@@ -601,6 +601,9 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
     # the user impersonation methods to handle personal tokens.
     supports_oauth2 = False
     oauth2_scope = ""
+    # Providers may omit scope from the token response when it matches the request.
+    # Engine specs must opt in when that provider behavior is documented.
+    oauth2_scope_omitted_means_requested = False
     oauth2_authorization_request_uri: str | None = None  # pylint: disable=invalid-name
     oauth2_token_request_uri: str | None = None
     oauth2_token_request_type = "data"  # noqa: S105
@@ -808,6 +811,17 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
         return urljoin(uri, "?" + urlencode(params))
 
     @classmethod
+    def normalize_oauth2_token_response(
+        cls,
+        config: OAuth2ClientConfig,
+        response: OAuth2TokenResponse,
+    ) -> OAuth2TokenResponse:
+        """Normalize provider-specific omissions in an OAuth token response."""
+        if cls.oauth2_scope_omitted_means_requested and "scope" not in response:
+            return {**response, "scope": config["scope"]}
+        return response
+
+    @classmethod
     def get_oauth2_token(
         cls,
         config: OAuth2ClientConfig,
@@ -840,7 +854,7 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
             else requests.post(uri, json=req_body, timeout=timeout)
         )
         response.raise_for_status()
-        return response.json()
+        return cls.normalize_oauth2_token_response(config, response.json())
 
     @classmethod
     def get_oauth2_fresh_token(
