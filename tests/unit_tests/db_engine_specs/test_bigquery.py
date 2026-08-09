@@ -529,6 +529,42 @@ def test_get_client_resolves_uri_project_with_application_default_credentials(
     client.assert_called_once_with(credentials=credentials, project=expected_project)
 
 
+def test_df_to_sql_passes_oauth_client_to_pandas_gbq(
+    mocker: MockerFixture,
+) -> None:
+    """Impersonated uploads reuse the OAuth client from the private engine."""
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    client = mock.Mock()
+    engine = mock.MagicMock()
+    engine.url.host = "google-host"
+    engine.dialect.oauth_client = client
+    df = mock.Mock()
+    pandas_gbq = mocker.patch(
+        "superset.db_engine_specs.bigquery.pandas_gbq", create=True
+    )
+    mocker.patch("superset.db_engine_specs.bigquery.can_upload", True)
+    mocker.patch.object(
+        BigQueryEngineSpec,
+        "get_engine",
+        return_value=mock.MagicMock(__enter__=mock.Mock(return_value=engine)),
+    )
+
+    BigQueryEngineSpec.df_to_sql(
+        database=mock.Mock(),
+        table=Table(table="name", schema="schema"),
+        df=df,
+        to_sql_kwargs={},
+    )
+
+    pandas_gbq.to_gbq.assert_called_once_with(
+        df,
+        project_id="google-host",
+        destination_table="schema.name",
+        bigquery_client=client,
+    )
+
+
 def test_get_time_partition_column_uses_catalog_in_table_reference(
     mocker: MockerFixture,
 ) -> None:

@@ -428,6 +428,35 @@ def test_warmup_predicate_detects_impersonated_database() -> None:
     assert _uses_impersonated_database(task) is True
 
 
+def test_webdriver_warmup_skips_impersonated_dashboards(
+    mocker: MockerFixture,
+) -> None:
+    """WebDriver warmup excludes dashboards backed by impersonated databases."""
+    from types import SimpleNamespace
+
+    from superset.tasks.cache import _get_non_impersonated_dashboard_urls
+
+    impersonated_database = SimpleNamespace(impersonate_user=True)
+    regular_database = SimpleNamespace(impersonate_user=False)
+    impersonated_dashboard = SimpleNamespace(
+        datasources=[SimpleNamespace(database=impersonated_database)]
+    )
+    regular_dashboard = SimpleNamespace(
+        datasources=[SimpleNamespace(database=regular_database)]
+    )
+    get_dash_url = mocker.patch(
+        "superset.tasks.cache.get_dash_url",
+        side_effect=lambda dashboard: str(id(dashboard)),
+    )
+
+    result = _get_non_impersonated_dashboard_urls(
+        [impersonated_dashboard, regular_dashboard]  # type: ignore[arg-type]
+    )
+
+    assert result == [str(id(regular_dashboard))]
+    get_dash_url.assert_called_once_with(regular_dashboard)
+
+
 def test_warmup_skips_impersonated_database_tasks(
     mocker: MockerFixture,
 ) -> None:

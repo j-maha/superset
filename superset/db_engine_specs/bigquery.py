@@ -719,7 +719,6 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         if not table.schema:
             raise SupersetException("The table schema must be defined")
 
-        to_gbq_kwargs = {}
         with cls.get_engine(
             database,
             catalog=table.catalog,
@@ -730,21 +729,23 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
                 "project_id": engine.url.host,
             }
 
-        # Add credentials if they are set on the SQLAlchemy dialect.
+            # Pass the live OAuth client so impersonated uploads use the logged-in
+            # user's credentials instead of ambient credentials.
+            if "oauth_client" in vars(engine.dialect):
+                to_gbq_kwargs["bigquery_client"] = engine.dialect.oauth_client
+            elif creds := engine.dialect.credentials_info:
+                to_gbq_kwargs["credentials"] = (
+                    service_account.Credentials.from_service_account_info(creds)
+                )
 
-        if creds := engine.dialect.credentials_info:
-            to_gbq_kwargs["credentials"] = (
-                service_account.Credentials.from_service_account_info(creds)
-            )
+            # Only pass through supported kwargs.
+            supported_kwarg_keys = {"if_exists"}
 
-        # Only pass through supported kwargs.
-        supported_kwarg_keys = {"if_exists"}
+            for key in supported_kwarg_keys:
+                if key in to_sql_kwargs:
+                    to_gbq_kwargs[key] = to_sql_kwargs[key]
 
-        for key in supported_kwarg_keys:
-            if key in to_sql_kwargs:
-                to_gbq_kwargs[key] = to_sql_kwargs[key]
-
-        pandas_gbq.to_gbq(df, **to_gbq_kwargs)
+            pandas_gbq.to_gbq(df, **to_gbq_kwargs)
 
     @classmethod
     def _get_client(
