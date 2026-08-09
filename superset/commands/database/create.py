@@ -41,10 +41,15 @@ from superset.commands.database.test_connection import TestConnectionDatabaseCom
 from superset.commands.database.utils import add_permissions
 from superset.daos.database import DatabaseDAO
 from superset.databases.utils import make_url_safe
-from superset.exceptions import OAuth2RedirectError, SupersetErrorsException
+from superset.exceptions import (
+    OAuth2RedirectError,
+    OAuth2RequiresSavedDBError,
+    SupersetErrorsException,
+)
 from superset.extensions import event_logger
 from superset.models.core import Database
 from superset.utils.decorators import on_error, transaction
+from superset.utils.oauth2 import is_oauth2_required
 
 logger = logging.getLogger(__name__)
 stats_logger = app.config["STATS_LOGGER"]
@@ -66,8 +71,11 @@ class CreateDatabaseCommand(BaseCommand):
 
         try:
             # Test connection before starting create transaction
-            TestConnectionDatabaseCommand(self._properties).run()
-        except OAuth2RedirectError:
+            TestConnectionDatabaseCommand(
+                self._properties,
+                allow_unsaved_oauth2=True,
+            ).run()
+        except (OAuth2RedirectError, OAuth2RequiresSavedDBError):
             # If we can't connect to the database due to an OAuth2 error we can still
             # save the database. Later, the user can sync permissions when setting up
             # data access rules.
@@ -91,6 +99,7 @@ class CreateDatabaseCommand(BaseCommand):
             )
             raise DatabaseConnectionFailedError() from ex
 
+        database: Database | None = None
         try:
             # create database and associated schema/catalog permissions
             database = self._create_database()
@@ -107,10 +116,15 @@ class CreateDatabaseCommand(BaseCommand):
             )
             # So we can show the original message
             raise
-        except (
-            DatabaseInvalidError,
-            Exception,
-        ) as ex:
+        except Exception as ex:
+            if database and is_oauth2_required(database, ex):
+                logger.warning(
+                    "Skipping permission sync for database '%s' until OAuth2 "
+                    "authorization is completed.",
+                    database.database_name,
+                )
+                return database
+
             event_logger.log_with_context(
                 action=f"db_creation_failed.{ex.__class__.__name__}",
                 engine=engine,

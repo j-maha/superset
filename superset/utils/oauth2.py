@@ -33,7 +33,11 @@ from werkzeug.routing import BuildError
 
 from superset import db
 from superset.distributed_lock import DistributedLock
-from superset.exceptions import AcquireDistributedLockFailedException, OAuth2Error
+from superset.exceptions import (
+    AcquireDistributedLockFailedException,
+    OAuth2Error,
+    OAuth2RequiresSavedDBError,
+)
 from superset.superset_typing import OAuth2ClientConfig, OAuth2State
 
 if TYPE_CHECKING:
@@ -76,6 +80,16 @@ def generate_code_challenge(code_verifier: str) -> str:
     return code_challenge
 
 
+def _oauth2_scopes_match(requested: str | None, granted: str | None) -> bool:
+    """Return whether a token has exactly the configured OAuth2 scopes.
+
+    Scope values are case-sensitive. Splitting on whitespace makes comparison
+    independent of ordering and repeated whitespace without treating distinct
+    scope values as equivalent.
+    """
+    return frozenset((requested or "").split()) == frozenset((granted or "").split())
+
+
 @backoff.on_exception(
     backoff.expo,
     AcquireDistributedLockFailedException,
@@ -110,6 +124,10 @@ def get_oauth2_access_token(
         .one_or_none()
     )
     if token is None:
+        return None
+
+    if not _oauth2_scopes_match(config.get("scope"), token.scope):
+        db.session.delete(token)
         return None
 
     if token.access_token and datetime.now() < token.access_token_expiration:
@@ -194,6 +212,8 @@ def refresh_oauth2_token(
         # Support single-use refresh tokens
         if new_refresh_token := token_response.get("refresh_token"):
             token.refresh_token = new_refresh_token
+        if new_scope := token_response.get("scope"):
+            token.scope = new_scope
 
         db.session.add(token)
 
@@ -307,14 +327,36 @@ class OAuth2ClientConfigSchema(Schema):
     )
 
 
+def is_oauth2_required(database: Database, ex: Exception) -> bool:
+    """Return whether a database error requires user OAuth2 authorization."""
+    return database.is_oauth2_enabled() and database.db_engine_spec.needs_oauth2(ex)
+
+
+def handle_oauth2_error(
+    database: Database,
+    ex: Exception,
+    oauth_database: Database | None = None,
+    require_saved_database: bool = False,
+) -> bool:
+    """Start OAuth2 or defer it until the database has been persisted."""
+    if not database.db_engine_spec.needs_oauth2(ex):
+        return False
+
+    target_database = oauth_database or database
+    if not database.is_oauth2_enabled() and not require_saved_database:
+        return False
+    if require_saved_database and not target_database.id:
+        raise OAuth2RequiresSavedDBError() from ex
+
+    target_database.start_oauth2_dance()
+    return True
+
+
 @contextmanager
 def check_for_oauth2(database: Database) -> Iterator[None]:
-    """
-    Run code and check if OAuth2 is needed.
-    """
+    """Run code and start OAuth2 when the database requires authorization."""
     try:
         yield
     except Exception as ex:
-        if database.is_oauth2_enabled() and database.db_engine_spec.needs_oauth2(ex):
-            database.db_engine_spec.start_oauth2_dance(database)
+        handle_oauth2_error(database, ex, require_saved_database=True)
         raise

@@ -196,6 +196,9 @@ def get_sql_results(  # pylint: disable=too-many-arguments
                     expand_data=expand_data,
                     log_params=log_params,
                 )
+            except OAuth2RedirectError:
+                # Preserve the redirect so the client can complete authorization.
+                raise
             except Exception as ex:  # pylint: disable=broad-except
                 logger.exception("Query %d: %s", query_id, ex)
                 stats_logger = app.config["STATS_LOGGER"]

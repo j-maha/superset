@@ -19,15 +19,19 @@
 
 import base64
 import hashlib
+from contextlib import nullcontext
 from datetime import datetime
 from typing import cast
 
 import pytest
 from freezegun import freeze_time
 from pytest_mock import MockerFixture
+from sqlalchemy.orm import Session
 
-from superset.superset_typing import OAuth2ClientConfig
+from superset.db_engine_specs.base import BaseEngineSpec
+from superset.superset_typing import OAuth2ClientConfig, OAuth2TokenResponse
 from superset.utils.oauth2 import (
+    _oauth2_scopes_match,
     decode_oauth2_state,
     encode_oauth2_state,
     generate_code_challenge,
@@ -38,6 +42,46 @@ from superset.utils.oauth2 import (
 )
 
 DUMMY_OAUTH2_CONFIG = cast(OAuth2ClientConfig, {})
+
+
+@pytest.mark.parametrize(
+    ("requested", "granted", "matches"),
+    [
+        (None, None, True),
+        ("", None, True),
+        (None, "", True),
+        ("scope-a scope-b", "scope-b   scope-a", True),
+        ("scope-a scope-a", "scope-a", True),
+        ("scope-a", "scope-a scope-extra", False),
+        (
+            "https://www.googleapis.com/auth/bigquery.readonly",
+            "https://www.googleapis.com/auth/bigquery",
+            False,
+        ),
+        ("Scope-A", "scope-a", False),
+        (None, "scope-a", False),
+    ],
+)
+def test_oauth2_scopes_match_exactly(
+    requested: str | None, granted: str | None, matches: bool
+) -> None:
+    assert _oauth2_scopes_match(requested, granted) is matches
+
+
+class LocalOAuth2EngineSpec(BaseEngineSpec):
+    @classmethod
+    def get_oauth2_fresh_token(
+        cls,
+        config: OAuth2ClientConfig,
+        refresh_token: str,
+    ) -> OAuth2TokenResponse:
+        assert config == DUMMY_OAUTH2_CONFIG
+        assert refresh_token == "old-refresh-token"  # noqa: S105
+        return {
+            "access_token": "new-access-token",
+            "expires_in": 3600,
+            "refresh_token": "new-refresh-token",
+        }
 
 
 def test_get_oauth2_access_token_base_no_token(mocker: MockerFixture) -> None:
@@ -91,6 +135,66 @@ def test_get_oauth2_access_token_base_refresh(mocker: MockerFixture) -> None:
     db.session.add.assert_called_with(token)
 
 
+def test_get_oauth2_access_token_persists_refresh(
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persist refreshed access and refresh tokens through the real ORM session."""
+    from flask_appbuilder.security.sqla.models import User
+
+    from superset.models.core import Database, DatabaseUserOAuth2Tokens
+
+    Database.metadata.create_all(session.get_bind())  # pylint: disable=no-member
+
+    user = User(
+        first_name="Refresh",
+        last_name="User",
+        email="oauth-refresh@example.org",
+        username="oauth-refresh",
+    )
+    database = Database(
+        database_name="oauth_refresh_db",
+        sqlalchemy_uri="sqlite://",
+    )
+    session.add_all([user, database])
+    session.flush()
+    session.add(
+        DatabaseUserOAuth2Tokens(
+            user_id=user.id,
+            database_id=database.id,
+            access_token="expired-access-token",  # noqa: S106
+            access_token_expiration=datetime(2024, 1, 1),
+            refresh_token="old-refresh-token",  # noqa: S106
+        )
+    )
+    session.flush()
+
+    monkeypatch.setattr(
+        "superset.utils.oauth2.DistributedLock",
+        lambda **_: nullcontext(),
+    )
+
+    with freeze_time("2024-01-02"):
+        result = get_oauth2_access_token(
+            DUMMY_OAUTH2_CONFIG,
+            database.id,
+            user.id,
+            LocalOAuth2EngineSpec,
+        )
+
+    session.flush()
+    session.expire_all()
+    token = (
+        session.query(DatabaseUserOAuth2Tokens)
+        .filter_by(user_id=user.id, database_id=database.id)
+        .one()
+    )
+    assert result == "new-access-token"  # noqa: S105
+    assert token.access_token == "new-access-token"  # noqa: S105
+    assert token.access_token_expiration == datetime(2024, 1, 2, 1)
+    assert token.refresh_token == "new-refresh-token"  # noqa: S105
+
+
 def test_get_oauth2_access_token_base_no_refresh(mocker: MockerFixture) -> None:
     """
     Test `get_oauth2_access_token` when token is expired and there's no refresh.
@@ -108,6 +212,27 @@ def test_get_oauth2_access_token_base_no_refresh(mocker: MockerFixture) -> None:
 
     # check that token was deleted
     db.session.delete.assert_called_with(token)
+
+
+def test_get_oauth2_access_token_deletes_token_with_stale_scope(
+    mocker: MockerFixture,
+) -> None:
+    db = mocker.patch("superset.utils.oauth2.db")
+    db_engine_spec = mocker.MagicMock()
+    token = mocker.MagicMock()
+    token.scope = "openid https://www.googleapis.com/auth/bigquery"
+    db.session.query().filter_by().one_or_none.return_value = token
+
+    assert (
+        get_oauth2_access_token(
+            {"scope": "openid https://www.googleapis.com/auth/bigquery.readonly"},
+            1,
+            1,
+            db_engine_spec,
+        )
+        is None
+    )
+    db.session.delete.assert_called_once_with(token)
 
 
 def test_refresh_oauth2_token_deletes_token_on_oauth2_exception(

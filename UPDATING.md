@@ -24,6 +24,15 @@ assists people when migrating to a new version.
 
 ## Next
 
+### BigQuery user impersonation requires OAuth2 configuration
+
+BigQuery databases with `impersonate_user` enabled now execute queries with the
+logged-in user’s Google identity. Configure a BigQuery OAuth2 client under
+`DATABASE_OAUTH2_CLIENTS` (or database OAuth2 client information), provide the
+BigQuery project ID, and have each user authorize access. Impersonated engines
+are not process-cached and query results are scoped per user.
+
+
 ### Dashboard "Export Data to Excel" requires a Celery worker and S3 bucket
 
 A new dashboard action exports every chart's data to a single multi-sheet

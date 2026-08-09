@@ -35,15 +35,11 @@ def add_impersonation_cache_key_if_needed(
     cache_dict: dict[str, Any],
 ) -> None:
     """
-    Add a per-user cache-key when the DB connection is configured for
-    per-user caching, no-op otherwise.
+    Add a per-user cache key for impersonated or opted-in databases.
     """
     extra = json_loads(database.extra or "{}")
     if (
-        (
-            feature_flag_manager.is_feature_enabled("CACHE_IMPERSONATION")
-            and database.impersonate_user
-        )
+        database.impersonate_user
         or feature_flag_manager.is_feature_enabled("CACHE_QUERY_BY_USER")
         or extra.get("per_user_caching", False)
     ):
