@@ -77,20 +77,16 @@ class OAuth2StoreTokenCommand(BaseCommand):
             code_verifier=code_verifier,
         )
 
+        granted_scope = token_response.get("scope")
+        if not granted_scope:
+            raise OAuth2Error("OAuth2 provider returned no usable scope")
+
         # delete old tokens
         if existing := DatabaseUserOAuth2TokensDAO.find_one_or_none(
             user_id=self._state["user_id"],
             database_id=self._state["database_id"],
         ):
             DatabaseUserOAuth2TokensDAO.delete([existing])
-
-        granted_scope = (
-            token_response.get("scope")
-            or self._parameters.get("scope")
-            or oauth2_config.get("scope")
-        )
-        if not granted_scope:
-            raise OAuth2Error("OAuth2 provider returned no usable scope")
 
         # store tokens
         expiration = datetime.now() + timedelta(seconds=token_response["expires_in"])
