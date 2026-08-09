@@ -1744,6 +1744,51 @@ def test_resolve_executor_user_returns_user_and_username(
     assert username == "real_user"
 
 
+def test_async_report_executes_state_machine_as_executor(
+    app: SupersetApp,
+    mocker: MockerFixture,
+) -> None:
+    """Scheduled reports run their state machine as the configured executor."""
+    from flask import g
+
+    from superset.commands.report.execute import AsyncExecuteReportScheduleCommand
+    from superset.utils.core import get_username
+
+    user = mocker.MagicMock(username="report_executor")
+    model = mocker.MagicMock()
+    model.dashboard_id = None
+    command = AsyncExecuteReportScheduleCommand(
+        "084e7ee6-5557-4ecd-9632-b7f39c9ec524",
+        model_id=1,
+        scheduled_dttm=datetime.now(),
+    )
+    mocker.patch.object(
+        command, "validate", side_effect=lambda: setattr(command, "_model", model)
+    )
+    mocker.patch(
+        "superset.commands.report.execute.get_executor",
+        return_value=(None, user.username),
+    )
+    mocker.patch(
+        "superset.commands.report.execute.security_manager.find_user",
+        return_value=user,
+    )
+    state_machine = mocker.patch(
+        "superset.commands.report.execute.ReportScheduleStateMachine"
+    )
+
+    def assert_executor_context() -> None:
+        assert g.user is user
+        assert get_username() == user.username
+
+    state_machine.return_value.run.side_effect = assert_executor_context
+
+    command.run()
+
+    state_machine.return_value.run.assert_called_once_with()
+    assert getattr(g, "user", None) is not user
+
+
 def test_update_recipient_to_slack_v2(mocker: MockerFixture):
     """
     Test converting a Slack recipient to Slack v2 format.

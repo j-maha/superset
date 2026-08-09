@@ -26,11 +26,13 @@ from flask_babel import gettext as __
 
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
 from superset.exceptions import (
+    OAuth2RedirectError,
     SupersetErrorException,
     SupersetErrorsException,
     SupersetGenericDBErrorException,
     SupersetTimeoutException,
 )
+from superset.extensions import security_manager
 from superset.sqllab.command_status import SqlJsonExecutionStatus
 from superset.utils import core as utils
 from superset.utils.core import get_username
@@ -66,6 +68,16 @@ class SqlJsonExecutorBase(SqlJsonExecutor, ABC):
         self._query_dao = query_dao
         self._get_sql_results_task = get_sql_results_task
 
+    @staticmethod
+    def _get_query_username(execution_context: SqlJsonExecutionContext) -> str | None:
+        """Return the request username, falling back to the persisted query user."""
+        if username := get_username():
+            return username
+        if user_id := execution_context.user_id:
+            if user := security_manager.get_user_by_id(user_id):
+                return user.username
+        return None
+
 
 class SynchronousSqlJsonExecutor(SqlJsonExecutorBase):
     _timeout_duration_in_seconds: int
@@ -96,7 +108,7 @@ class SynchronousSqlJsonExecutor(SqlJsonExecutorBase):
                 execution_context, rendered_query, log_params
             )
             execution_context.set_execution_result(data)
-        except SupersetTimeoutException:
+        except (OAuth2RedirectError, SupersetTimeoutException):
             raise
         except Exception as ex:
             logger.exception("Query %i failed unexpectedly", query_id)
@@ -142,7 +154,7 @@ class SynchronousSqlJsonExecutor(SqlJsonExecutorBase):
             rendered_query,
             return_results=True,
             store_results=self._is_store_results(execution_context),
-            username=get_username(),
+            username=self._get_query_username(execution_context),
             expand_data=execution_context.expand_data,
             log_params=log_params,
         )
@@ -175,7 +187,7 @@ class ASynchronousSqlJsonExecutor(SqlJsonExecutorBase):
                 rendered_query,
                 return_results=False,
                 store_results=not execution_context.select_as_cta,
-                username=get_username(),
+                username=self._get_query_username(execution_context),
                 start_time=now_as_float(),
                 expand_data=execution_context.expand_data,
                 log_params=log_params,

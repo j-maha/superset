@@ -522,16 +522,16 @@ const ExtraOptions = ({
                     onChange={onInputChange}
                   >
                     {t(
-                      'Impersonate logged in user (Presto, Trino, Drill, Hive, and Google Sheets)',
+                      'Impersonate logged in user (Presto, Trino, Drill, Hive, Google Sheets, and BigQuery)',
                     )}
                   </Checkbox>
                   <InfoTooltip
                     tooltip={t(
-                      'If Presto or Trino, all the queries in SQL Lab are going to be executed as the ' +
-                        'currently logged on user who must have permission to run them. If Hive ' +
-                        'and hive.server2.enable.doAs is enabled, will run the queries as ' +
-                        'service account, but impersonate the currently logged on user via ' +
-                        'hive.server2.proxy.user property.',
+                      'For Presto and Trino, queries run as the logged-in user, who must have ' +
+                        'permission to execute them. When Hive has hive.server2.enable.doAs enabled, ' +
+                        'queries run as the service account while impersonating the logged-in user ' +
+                        'through hive.server2.proxy.user. For BigQuery, each user must authorize ' +
+                        'OAuth2 access, and queries run with that user’s Google identity.',
                     )}
                   />
                 </div>

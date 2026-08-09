@@ -90,6 +90,7 @@ from superset.utils.core import get_query_source_from_request, get_username
 from superset.utils.oauth2 import (
     check_for_oauth2,
     get_oauth2_access_token,
+    handle_oauth2_error,
     OAuth2ClientConfigSchema,
 )
 
@@ -508,45 +509,41 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
                     # via ``_ENGINE_CACHE`` races with concurrent connection
                     # checkouts iterating the same deque ("RuntimeError: deque
                     # mutated during iteration", surfacing as 500s). Request a
-                    # private, uncached engine whenever prequeries are present
-                    # so the listener add/remove never touches a shared object.
+                    # private, uncached engine whenever prequeries or user
+                    # impersonation are present. Per-user credentials must not
+                    # be shared or retained globally.
+                    cacheable = not prequeries and not self.impersonate_user
                     engine = self._get_sqla_engine(
                         catalog=catalog,
                         schema=schema,
                         nullpool=nullpool,
                         source=source,
                         sqlalchemy_uri=sqlalchemy_uri,
-                        cacheable=not prequeries,
+                        cacheable=cacheable,
                     )
+
+                    def run_prequeries(
+                        dbapi_connection: Any,
+                        connection_record: Any,  # pylint: disable=unused-argument
+                    ) -> None:
+                        cursor = dbapi_connection.cursor()
+                        try:
+                            for prequery in prequeries:
+                                cursor.execute(prequery)
+                        finally:
+                            cursor.close()
+
                     if prequeries:
                         # SQLAlchemy connect event: runs prequeries on every new
                         # DBAPI connection (e.g. SET search_path for PostgreSQL).
-                        def run_prequeries(
-                            dbapi_connection: Any,
-                            connection_record: Any,  # pylint: disable=unused-argument
-                        ) -> None:
-                            cursor = dbapi_connection.cursor()
-                            try:
-                                for prequery in prequeries:
-                                    cursor.execute(prequery)
-                            finally:
-                                cursor.close()
-
                         sqla.event.listen(engine, "connect", run_prequeries)
-                        try:
-                            yield engine
-                        finally:
-                            sqla.event.remove(engine, "connect", run_prequeries)
-                            # The engine is private (cacheable=False above), so
-                            # nothing else can hold a reference: dispose it to
-                            # release its pool immediately. With the default
-                            # nullpool=True this is a no-op safety net; it
-                            # matters if a caller ever passes nullpool=False,
-                            # where each private engine would otherwise keep a
-                            # short-lived QueuePool alive until GC.
-                            engine.dispose()
-                    else:
+                    try:
                         yield engine
+                    finally:
+                        if prequeries:
+                            sqla.event.remove(engine, "connect", run_prequeries)
+                        if not cacheable:
+                            engine.dispose()
 
     def _get_sqla_engine(  # pylint: disable=too-many-locals  # noqa: C901
         self,
@@ -561,6 +558,7 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
             sqlalchemy_uri if sqlalchemy_uri else self.sqlalchemy_uri_decrypted
         )
         self.db_engine_spec.validate_database_uri(sqlalchemy_url)
+        cacheable = cacheable and not self.impersonate_user
 
         extra = self.get_extra(source)
         engine_kwargs = extra.get("engine_params", {})
@@ -1436,8 +1434,7 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
         If OAuth2 is enabled and the exception indicates that OAuth2 is needed,
         starts the OAuth2 dance.
         """
-        if self.is_oauth2_enabled() and self.db_engine_spec.needs_oauth2(ex):
-            self.start_oauth2_dance()
+        handle_oauth2_error(self, ex)
 
     def purge_oauth2_tokens(self) -> None:
         """
@@ -1448,7 +1445,7 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
         scope or in the endpoints.
         """
         db.session.query(DatabaseUserOAuth2Tokens).filter(
-            DatabaseUserOAuth2Tokens.id == self.id
+            DatabaseUserOAuth2Tokens.database_id == self.id
         ).delete()
 
     def execute(

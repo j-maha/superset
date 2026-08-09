@@ -38,12 +38,14 @@ from superset.databases.utils import make_url_safe
 from superset.errors import ErrorLevel, SupersetErrorType
 from superset.exceptions import (
     OAuth2RedirectError,
+    OAuth2RequiresSavedDBError,
     SupersetErrorsException,
     SupersetSecurityException,
     SupersetTimeoutException,
 )
 from superset.extensions import event_logger
 from superset.models.core import Database
+from superset.utils.oauth2 import handle_oauth2_error
 from superset.utils.ssh_tunnel import unmask_password_info
 
 logger = logging.getLogger(__name__)
@@ -65,9 +67,15 @@ class TestConnectionDatabaseCommand(BaseCommand):
     _model: Optional[Database] = None
     _context: dict[str, Any]
     _uri: str
+    _allow_unsaved_oauth2: bool
 
-    def __init__(self, data: dict[str, Any]):
+    def __init__(
+        self,
+        data: dict[str, Any],
+        allow_unsaved_oauth2: bool = False,
+    ):
         self._properties = data.copy()
+        self._allow_unsaved_oauth2 = allow_unsaved_oauth2
 
         if (database_name := self._properties.get("database_name")) is not None:
             self._model = DatabaseDAO.get_database_by_name(database_name)
@@ -140,6 +148,8 @@ class TestConnectionDatabaseCommand(BaseCommand):
                 engine=engine_name,
             )
 
+            # Keep ping failures separate from engine-construction failures so both
+            # paths can start OAuth2 or preserve their specific connection errors.
             with database.get_sqla_engine() as engine:
                 try:
                     alive = ping(engine)
@@ -148,23 +158,19 @@ class TestConnectionDatabaseCommand(BaseCommand):
                         error_type=SupersetErrorType.CONNECTION_DATABASE_TIMEOUT,
                         message=(
                             "Please check your connection details and database settings, "  # noqa: E501
-                            "and ensure that your database is accepting connections, "
-                            "then try connecting again."
+                            "and ensure that your database is accepting "
+                            "connections, then try connecting again."
                         ),
                         level=ErrorLevel.ERROR,
                         extra={"sqlalchemy_uri": database.sqlalchemy_uri},
                     ) from ex
                 except Exception as ex:  # pylint: disable=broad-except
-                    # If the connection failed because OAuth2 is needed, start the flow.
-                    if (
-                        database.is_oauth2_enabled()
-                        and database.db_engine_spec.needs_oauth2(ex)
-                    ):
-                        database.start_oauth2_dance()
-
-                    alive = False
-                    # So we stop losing the original message if any
-                    ex_str = str(ex)
+                    if self._defer_oauth2_if_allowed(ex, database):
+                        alive = True
+                    else:
+                        alive = False
+                        # So we stop losing the original message if any
+                        ex_str = str(ex)
 
             if not alive:
                 raise DBAPIError(ex_str or None, None, None)
@@ -212,6 +218,8 @@ class TestConnectionDatabaseCommand(BaseCommand):
             raise SupersetErrorsException(errors, status=400) from ex
         except OAuth2RedirectError:
             raise
+        except OAuth2RequiresSavedDBError as ex:
+            raise SupersetErrorsException([ex.error], status=400) from ex
         except SupersetSecurityException as ex:
             event_logger.log_with_context(
                 action=get_log_connection_action(
@@ -242,10 +250,17 @@ class TestConnectionDatabaseCommand(BaseCommand):
             if not database:
                 raise
 
-            if database.is_oauth2_enabled() and database.db_engine_spec.needs_oauth2(
-                ex
-            ):
-                database.start_oauth2_dance()
+            if self._defer_oauth2_if_allowed(ex, database):
+                # Engine construction can fail before the inner ping handler runs.
+                event_logger.log_with_context(
+                    action=get_log_connection_action(
+                        "test_connection_success",
+                        ssh_tunnel_properties,
+                    ),
+                    engine=engine_name,
+                )
+                return
+
             event_logger.log_with_context(
                 action=get_log_connection_action(
                     "test_connection_error",
@@ -256,6 +271,21 @@ class TestConnectionDatabaseCommand(BaseCommand):
             )
             errors = database.db_engine_spec.extract_errors(ex, self._context)
             raise DatabaseTestConnectionUnexpectedError(errors) from ex
+
+    def _defer_oauth2_if_allowed(self, ex: Exception, database: Database) -> bool:
+        """Defer unsaved OAuth authorization when this is a create flow."""
+        try:
+            handle_oauth2_error(
+                database,
+                ex,
+                oauth_database=self._model,
+                require_saved_database=True,
+            )
+        except OAuth2RequiresSavedDBError:
+            if not self._allow_unsaved_oauth2:
+                raise
+            return True
+        return False
 
     def validate(self) -> None:
         if self._properties.get("ssh_tunnel"):

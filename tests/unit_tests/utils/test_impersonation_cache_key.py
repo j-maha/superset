@@ -93,6 +93,25 @@ def test_per_user_caching_in_extra_json_enables_key():
         assert _run(database)["impersonation_key"] == "alice"
 
 
+@patch("superset.utils.cache_keys.feature_flag_manager")
+def test_database_impersonation_scopes_cache_without_feature_flag(
+    feature_flag_mock,
+):
+    feature_flag_mock.is_feature_enabled.side_effect = lambda feature=None: False
+    database = Database(
+        database_name="d",
+        sqlalchemy_uri="sqlite://",
+        impersonate_user=True,
+    )
+
+    with override_user(User(username="alice")):
+        key_a = _run(database)["impersonation_key"]
+    with override_user(User(username="bob")):
+        key_b = _run(database)["impersonation_key"]
+
+    assert key_a != key_b
+
+
 def test_no_user_yields_no_key(app_context):  # noqa: ARG001
     """
     With no logged-in user, the engine spec returns None even when per-user
