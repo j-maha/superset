@@ -174,5 +174,5 @@ def test_command_with_oauth2_unsaved_database(mocker: MockerFixture) -> None:
 
     TestConnectionDatabaseCommand(
         properties,
-        allow_oauth2_requires_saved_db=True,
+        allow_unsaved_oauth2=True,
     ).run()

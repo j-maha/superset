@@ -28,6 +28,8 @@ from sqlalchemy_bigquery import BigQueryDialect
 from sqlalchemy_bigquery._helpers import SCOPES
 from sqlalchemy_bigquery.parse_url import parse_url
 
+from superset.db_engine_specs.exceptions import BigQueryOAuth2TokenRequiredError
+
 
 class ExtendedQueryDialect(BigQueryDialect):
     """BigQuery dialect that can construct a client from a user token."""
@@ -58,7 +60,9 @@ class ExtendedQueryDialect(BigQueryDialect):
 
         oauth_token = self.oauth_token_provider()
         if not oauth_token:
-            raise ValueError("An OAuth2 access token is required for impersonation")
+            raise BigQueryOAuth2TokenRequiredError(
+                "An OAuth2 access token is required for impersonation"
+            )
 
         (
             self.project_id,

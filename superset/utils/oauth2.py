@@ -321,5 +321,6 @@ def check_for_oauth2(database: Database) -> Iterator[None]:
             if database.id:
                 database.db_engine_spec.start_oauth2_dance(database)
             else:
+                # OAuth state must reference a persisted database record.
                 raise OAuth2RequiresSavedDBError() from ex
         raise

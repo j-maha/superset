@@ -39,3 +39,7 @@ class SupersetDBAPIOperationalError(SupersetDBAPIError):
 
 class SupersetDBAPIProgrammingError(SupersetDBAPIError):
     status = 400
+
+
+class BigQueryOAuth2TokenRequiredError(SupersetDBAPIConnectionError):
+    """Raised when BigQuery impersonation has no current user token."""

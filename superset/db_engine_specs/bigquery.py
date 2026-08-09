@@ -49,7 +49,10 @@ from superset.db_engine_specs.base import (
     BasicPropertiesType,
     DatabaseCategory,
 )
-from superset.db_engine_specs.exceptions import SupersetDBAPIConnectionError
+from superset.db_engine_specs.exceptions import (
+    BigQueryOAuth2TokenRequiredError,
+    SupersetDBAPIConnectionError,
+)
 from superset.errors import SupersetError, SupersetErrorType
 from superset.exceptions import OAuth2RedirectError, SupersetException
 from superset.sql.parse import SQLScript, Table
@@ -727,16 +730,9 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
             to_gbq_kwargs = {
                 "destination_table": str(table),
                 "project_id": engine.url.host,
+                # Keep the client alive until pandas-gbq has submitted the upload.
+                "bigquery_client": cls._get_client(engine, database),
             }
-
-            # Pass the live OAuth client so impersonated uploads use the logged-in
-            # user's credentials instead of ambient credentials.
-            if "oauth_client" in vars(engine.dialect):
-                to_gbq_kwargs["bigquery_client"] = engine.dialect.oauth_client
-            elif creds := engine.dialect.credentials_info:
-                to_gbq_kwargs["credentials"] = (
-                    service_account.Credentials.from_service_account_info(creds)
-                )
 
             # Only pass through supported kwargs.
             supported_kwarg_keys = {"if_exists"}
@@ -867,9 +863,9 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         if dependencies_installed and isinstance(ex, dbapi.exceptions.DatabaseError):
             if ex.args and isinstance(ex.args[0], Exception):
                 ex = ex.args[0]
-        if super().needs_oauth2(ex):
-            return True
-        return str(ex) == "An OAuth2 access token is required for impersonation"
+        return super().needs_oauth2(ex) or isinstance(
+            ex, BigQueryOAuth2TokenRequiredError
+        )
 
     @classmethod
     def _has_service_account_credentials(cls, database: Database) -> bool:
@@ -885,7 +881,11 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         url: URL,
         engine_kwargs: dict[str, Any],
     ) -> tuple[URL, dict[str, Any]]:
-        """Configure a private extended dialect for the current user."""
+        """Configure a private extended dialect for the current user.
+
+        ``Database.get_sqla_engine`` resolves a fresh access token before calling
+        this method, refreshing the persisted OAuth token when necessary.
+        """
         if cls._has_service_account_credentials(database):
             raise SupersetException(
                 "Service account credentials and user impersonation cannot be used "
@@ -1030,6 +1030,8 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         value = make_url_safe(uri)
         project_id = value.host or value.database
 
+        # Encrypted extras are persisted JSON; the schema validates their shape before
+        # this method is called, but static typing cannot infer that runtime contract.
         return cast(
             BigQueryParametersType,
             {

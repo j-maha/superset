@@ -1201,22 +1201,20 @@ def test_needs_oauth2_when_impersonation_token_is_missing(
     from flask import g
 
     from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.db_engine_specs.exceptions import BigQueryOAuth2TokenRequiredError
 
     g.user = mock.MagicMock()
 
-    assert BigQueryEngineSpec.needs_oauth2(
-        ValueError("An OAuth2 access token is required for impersonation")
-    )
+    assert BigQueryEngineSpec.needs_oauth2(BigQueryOAuth2TokenRequiredError())
 
 
 def test_needs_oauth2_without_user_context(app_context: None) -> None:
     """Unsaved connection tests must classify missing impersonation tokens as OAuth."""
     from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.db_engine_specs.exceptions import BigQueryOAuth2TokenRequiredError
 
     with mock.patch("superset.db_engine_specs.bigquery.dependencies_installed", False):
-        assert BigQueryEngineSpec.needs_oauth2(
-            ValueError("An OAuth2 access token is required for impersonation")
-        )
+        assert BigQueryEngineSpec.needs_oauth2(BigQueryOAuth2TokenRequiredError())
 
 
 def test_impersonate_user_selects_extended_driver() -> None:

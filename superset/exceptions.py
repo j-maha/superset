@@ -415,7 +415,7 @@ class OAuth2RequiresSavedDBError(SupersetErrorException):
             SupersetError(
                 message=(
                     "This database requires OAuth2 authentication. Please save the "
-                    "database first, then authorize in SQL Lab."
+                    "database first, then authorize access."
                 ),
                 error_type=SupersetErrorType.OAUTH2_REQUIRES_SAVED_DATABASE,
                 level=ErrorLevel.WARNING,

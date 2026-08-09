@@ -66,15 +66,15 @@ class TestConnectionDatabaseCommand(BaseCommand):
     _model: Optional[Database] = None
     _context: dict[str, Any]
     _uri: str
-    _allow_oauth2_requires_saved_db: bool
+    _allow_unsaved_oauth2: bool
 
     def __init__(
         self,
         data: dict[str, Any],
-        allow_oauth2_requires_saved_db: bool = False,
+        allow_unsaved_oauth2: bool = False,
     ):
         self._properties = data.copy()
-        self._allow_oauth2_requires_saved_db = allow_oauth2_requires_saved_db
+        self._allow_unsaved_oauth2 = allow_unsaved_oauth2
 
         if (database_name := self._properties.get("database_name")) is not None:
             self._model = DatabaseDAO.get_database_by_name(database_name)
@@ -147,6 +147,8 @@ class TestConnectionDatabaseCommand(BaseCommand):
                 engine=engine_name,
             )
 
+            # Keep ping failures separate from engine-construction failures so both
+            # paths can start OAuth2 or preserve their specific connection errors.
             try:
                 with database.get_sqla_engine() as engine:
                     try:
@@ -171,7 +173,7 @@ class TestConnectionDatabaseCommand(BaseCommand):
                         # So we stop losing the original message if any
                         ex_str = str(ex)
             except OAuth2RequiresSavedDBError:
-                if not self._allow_oauth2_requires_saved_db:
+                if not self._allow_unsaved_oauth2:
                     raise
                 # Database creation can proceed before per-user OAuth authorization.
                 alive = True
@@ -257,7 +259,7 @@ class TestConnectionDatabaseCommand(BaseCommand):
             try:
                 self._check_handle_oauth2_needed(ex, database)
             except OAuth2RequiresSavedDBError:
-                if not self._allow_oauth2_requires_saved_db:
+                if not self._allow_unsaved_oauth2:
                     raise
                 # Engine construction can fail before the inner ping handler runs.
                 event_logger.log_with_context(
@@ -281,15 +283,8 @@ class TestConnectionDatabaseCommand(BaseCommand):
             raise DatabaseTestConnectionUnexpectedError(errors) from ex
 
     def _check_handle_oauth2_needed(self, ex: Exception, database: Database) -> None:
-        """Handle the case where OAuth2 authentication is required."""
+        """Start OAuth2 for a saved database or defer it until creation."""
         needs_oauth2 = database.db_engine_spec.needs_oauth2(ex)
-        if (
-            not needs_oauth2
-            and database.db_engine_spec.engine == "bigquery"
-            and str(ex) == "An OAuth2 access token is required for impersonation"
-        ):
-            needs_oauth2 = True
-
         if not needs_oauth2:
             return
 

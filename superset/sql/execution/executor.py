@@ -1035,6 +1035,7 @@ class SQLExecutor:
             "schema": opts.schema or "",
             "limit": opts.limit if opts.limit is not None else "",
         }
+        # Impersonated results remain cacheable, but only for the requesting user.
         add_impersonation_cache_key_if_needed(self.database, cache_values)
         key_string = "|".join(
             f"{key}={value}" for key, value in sorted(cache_values.items())
