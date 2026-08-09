@@ -48,8 +48,16 @@ jest.mock('src/components/Splitter', () => {
     </div>
   );
   // eslint-disable-next-line react/display-name
-  Splitter.Panel = ({ children }: { children: React.ReactNode }) => (
-    <div data-test="mock-panel">{children}</div>
+  Splitter.Panel = ({
+    children,
+    min,
+  }: {
+    children: React.ReactNode;
+    min?: number;
+  }) => (
+    <div data-test="mock-panel" data-min={min}>
+      {children}
+    </div>
   );
   return { Splitter };
 });
@@ -98,6 +106,16 @@ test('calls setWidth on sidebar resize when not hidden', async () => {
   // set different width
   await userEvent.click(getByRole('button', { name: 'Resize' }));
   await waitFor(() => expect(setWidth).toHaveBeenCalled());
+});
+
+test('removes the minimum width when the left sidebar is collapsed', () => {
+  (useStoredSidebarWidth as jest.Mock).mockReturnValue([0, jest.fn()]);
+  const { getAllByTestId } = render(<AppLayout {...defaultProps} />, {
+    useRedux: true,
+    initialState,
+  });
+
+  expect(getAllByTestId('mock-panel')[0]).toHaveAttribute('data-min', '0');
 });
 
 test('right sidebar is hidden when no extensions registered', () => {

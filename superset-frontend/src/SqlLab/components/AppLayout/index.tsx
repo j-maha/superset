@@ -118,7 +118,7 @@ const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
             showCollapsibleIcon: true,
           }}
           size={leftWidth}
-          min={SQL_EDITOR_LEFTBAR_WIDTH}
+          min={leftWidth === 0 ? 0 : SQL_EDITOR_LEFTBAR_WIDTH}
         >
           <StyledSidebar>
             <SqlEditorLeftBar
@@ -136,7 +136,7 @@ const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
               showCollapsibleIcon: true,
             }}
             size={rightWidth}
-            min={SQL_EDITOR_RIGHTBAR_WIDTH}
+            min={rightWidth === 0 ? 0 : SQL_EDITOR_RIGHTBAR_WIDTH}
           >
             <ContentWrapper>
               <ViewListExtension viewId={ViewLocations.sqllab.rightSidebar} />
