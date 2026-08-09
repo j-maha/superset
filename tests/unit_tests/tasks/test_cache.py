@@ -433,6 +433,7 @@ def test_webdriver_warmup_skips_impersonated_dashboards(
 ) -> None:
     """WebDriver warmup excludes dashboards backed by impersonated databases."""
     from types import SimpleNamespace
+    from typing import cast
 
     from superset.tasks.cache import _get_non_impersonated_dashboard_urls
 
@@ -450,7 +451,7 @@ def test_webdriver_warmup_skips_impersonated_dashboards(
     )
 
     result = _get_non_impersonated_dashboard_urls(
-        [impersonated_dashboard, regular_dashboard]  # type: ignore[arg-type]
+        cast(list[Any], [impersonated_dashboard, regular_dashboard])
     )
 
     assert result == [str(id(regular_dashboard))]
