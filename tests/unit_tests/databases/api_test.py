@@ -74,7 +74,7 @@ def test_test_connection_oauth2_requires_saved_database(
     assert response.status_code == 400
     assert response.json["message"] == (
         "This database requires OAuth2 authentication. Please save the database first, "
-        "then authorize in SQL Lab."
+        "then authorize access."
     )
 
 
