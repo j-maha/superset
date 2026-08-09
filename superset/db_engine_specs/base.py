@@ -603,7 +603,7 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
     oauth2_scope = ""
     # Providers may omit scope from the token response when it matches the request.
     # Engine specs must opt in when that provider behavior is documented.
-    oauth2_scope_omitted_means_requested = False
+    oauth2_token_response_scope_optional = False
     oauth2_authorization_request_uri: str | None = None  # pylint: disable=invalid-name
     oauth2_token_request_uri: str | None = None
     oauth2_token_request_type = "data"  # noqa: S105
@@ -817,7 +817,7 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
         response: OAuth2TokenResponse,
     ) -> OAuth2TokenResponse:
         """Normalize provider-specific omissions in an OAuth token response."""
-        if cls.oauth2_scope_omitted_means_requested and "scope" not in response:
+        if cls.oauth2_token_response_scope_optional and "scope" not in response:
             return {**response, "scope": config["scope"]}
         return response
 

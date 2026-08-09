@@ -149,7 +149,7 @@ class GSheetsEngineSpec(ShillelaghEngineSpec):
     # OAuth 2.0
     supports_oauth2 = True
     oauth2_scope = " ".join(SCOPES)
-    oauth2_scope_omitted_means_requested = True
+    oauth2_token_response_scope_optional = True
     oauth2_authorization_request_uri = (  # pylint: disable=invalid-name
         "https://accounts.google.com/o/oauth2/v2/auth"
     )

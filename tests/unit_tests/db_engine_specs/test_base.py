@@ -999,7 +999,7 @@ def test_get_oauth2_token_normalizes_scope_for_opt_in_provider(
     mocker: MockerFixture,
 ) -> None:
     class ProviderEngineSpec(BaseEngineSpec):
-        oauth2_scope_omitted_means_requested = True
+        oauth2_token_response_scope_optional = True
 
     mock_post = mocker.patch("superset.db_engine_specs.base.requests.post")
     mock_post.return_value.json.return_value = {
