@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from superset.db_engine_specs.base import BaseEngineSpec
 from superset.superset_typing import OAuth2ClientConfig, OAuth2TokenResponse
 from superset.utils.oauth2 import (
+    _oauth2_scopes_match,
     decode_oauth2_state,
     encode_oauth2_state,
     generate_code_challenge,
@@ -41,6 +42,30 @@ from superset.utils.oauth2 import (
 )
 
 DUMMY_OAUTH2_CONFIG = cast(OAuth2ClientConfig, {})
+
+
+@pytest.mark.parametrize(
+    ("requested", "granted", "matches"),
+    [
+        (None, None, True),
+        ("", None, True),
+        (None, "", True),
+        ("scope-a scope-b", "scope-b   scope-a", True),
+        ("scope-a scope-a", "scope-a", True),
+        ("scope-a", "scope-a scope-extra", False),
+        (
+            "https://www.googleapis.com/auth/bigquery.readonly",
+            "https://www.googleapis.com/auth/bigquery",
+            False,
+        ),
+        ("Scope-A", "scope-a", False),
+        (None, "scope-a", False),
+    ],
+)
+def test_oauth2_scopes_match_exactly(
+    requested: str | None, granted: str | None, matches: bool
+) -> None:
+    assert _oauth2_scopes_match(requested, granted) is matches
 
 
 class LocalOAuth2EngineSpec(BaseEngineSpec):

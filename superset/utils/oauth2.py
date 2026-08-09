@@ -80,11 +80,14 @@ def generate_code_challenge(code_verifier: str) -> str:
     return code_challenge
 
 
-def _oauth2_scopes_match(requested: str, granted: str | None) -> bool:
-    """Return whether a token grants all scopes required by the current config."""
-    if not granted:
-        return False
-    return set(requested.split()) <= set(granted.split())
+def _oauth2_scopes_match(requested: str | None, granted: str | None) -> bool:
+    """Return whether a token has exactly the configured OAuth2 scopes.
+
+    Scope values are case-sensitive. Splitting on whitespace makes comparison
+    independent of ordering and repeated whitespace without treating distinct
+    scope values as equivalent.
+    """
+    return frozenset((requested or "").split()) == frozenset((granted or "").split())
 
 
 @backoff.on_exception(
@@ -123,7 +126,7 @@ def get_oauth2_access_token(
     if token is None:
         return None
 
-    if config.get("scope") and not _oauth2_scopes_match(config["scope"], token.scope):
+    if not _oauth2_scopes_match(config.get("scope"), token.scope):
         db.session.delete(token)
         return None
 
