@@ -927,6 +927,24 @@ credentials file (as a JSON).
 
 You should then be able to connect to your BigQuery datasets.
 
+##### BigQuery OAuth impersonation
+
+When BigQuery is configured for per-user OAuth impersonation, Superset requests the
+`https://www.googleapis.com/auth/bigquery.readonly` scope by default. This keeps tokens
+issued by Superset read-only even when the impersonated user has write permissions in
+other contexts.
+
+To allow impersonated users to perform BigQuery write operations through Superset,
+explicitly opt in from `superset_config.py`:
+
+```python
+BIGQUERY_IMPERSONATION_ALLOW_WRITE = True
+```
+
+Changing this setting does not reuse an incompatible stored token. Users must authorize
+again so Superset can obtain a token with the configured scope.
+
+
 ![CleanShot 2021-10-22 at 04 47 08](https://user-images.githubusercontent.com/52086618/138354340-df57f477-d3e5-42d4-b032-d901c69d2213.gif)
 
 To be able to upload CSV or Excel files to BigQuery in Superset, you'll need to also add the

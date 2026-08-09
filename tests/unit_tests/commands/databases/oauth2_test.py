@@ -36,6 +36,7 @@ def mock_database(mocker: MockerFixture) -> MagicMock:
     database.get_oauth2_config.return_value = {
         "client_id": "test",
         "client_secret": "secret",
+        "scope": "test-scope",
     }
     database.db_engine_spec.get_oauth2_token.return_value = {
         "access_token": "test_access_token",
@@ -133,6 +134,7 @@ def test_run_success(
 
     assert result == "new_token"
     mock_create.assert_called_once()
+    assert mock_create.call_args.kwargs["attributes"]["scope"] == "test-scope"
 
 
 def test_run_existing_token(

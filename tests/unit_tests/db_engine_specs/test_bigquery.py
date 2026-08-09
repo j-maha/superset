@@ -1179,6 +1179,88 @@ def test_needs_oauth2_without_user_context(app_context: None) -> None:
         assert BigQueryEngineSpec.needs_oauth2(BigQueryOAuth2TokenRequiredError())
 
 
+def test_get_oauth2_config_uses_readonly_scope_for_impersonation(
+    mocker: MockerFixture, app_context: None
+) -> None:
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.models.core import Database
+
+    mocker.patch.dict(
+        "superset.db_engine_specs.bigquery.current_app.config",
+        {
+            "DATABASE_OAUTH2_CLIENTS": {
+                "Google BigQuery": {
+                    "id": "client-id",
+                    "secret": "client-secret",
+                    "scope": "openid https://www.googleapis.com/auth/bigquery",
+                }
+            },
+            "BIGQUERY_IMPERSONATION_ALLOW_WRITE": False,
+        },
+    )
+    database = Database(
+        database_name="bigquery",
+        sqlalchemy_uri="bigquery://demo-project",
+        impersonate_user=True,
+    )
+
+    config = database.get_oauth2_config()
+
+    assert config is not None
+    assert config["scope"] == BigQueryEngineSpec.oauth2_readonly_scope
+
+
+def test_get_oauth2_config_allows_write_scope_when_configured(
+    mocker: MockerFixture, app_context: None
+) -> None:
+    from superset.models.core import Database
+
+    configured_scope = "openid https://www.googleapis.com/auth/bigquery"
+    mocker.patch.dict(
+        "superset.db_engine_specs.bigquery.current_app.config",
+        {
+            "DATABASE_OAUTH2_CLIENTS": {
+                "Google BigQuery": {
+                    "id": "client-id",
+                    "secret": "client-secret",
+                    "scope": configured_scope,
+                }
+            },
+            "BIGQUERY_IMPERSONATION_ALLOW_WRITE": True,
+        },
+    )
+    database = Database(
+        database_name="bigquery",
+        sqlalchemy_uri="bigquery://demo-project",
+        impersonate_user=True,
+    )
+
+    config = database.get_oauth2_config()
+
+    assert config is not None
+    assert config["scope"] == configured_scope
+
+
+def test_custom_estimate_statement_cost_uses_query_api(
+    mocker: MockerFixture,
+) -> None:
+    from google.cloud import bigquery
+
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    client = mocker.MagicMock()
+    client.query.return_value.total_bytes_processed = 1024
+
+    assert BigQueryEngineSpec.custom_estimate_statement_cost("SELECT 1", client) == {
+        "KB Processed": 1.0
+    }
+    client.query.assert_called_once()
+    assert (
+        client.query.call_args.kwargs["api_method"]
+        == bigquery.enums.QueryApiMethod.QUERY
+    )
+
+
 def test_impersonate_user_selects_extended_driver() -> None:
     from superset.db_engine_specs.bigquery import BigQueryEngineSpec
 

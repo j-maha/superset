@@ -93,6 +93,7 @@ class OAuth2StoreTokenCommand(BaseCommand):
                 "access_token": token_response["access_token"],
                 "access_token_expiration": expiration,
                 "refresh_token": token_response.get("refresh_token"),
+                "scope": token_response.get("scope") or oauth2_config["scope"],
             },
         )
 

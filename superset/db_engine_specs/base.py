@@ -735,9 +735,19 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
         raise OAuth2RedirectError(oauth_url, tab_id, default_redirect_uri)
 
     @classmethod
-    def get_oauth2_config(cls) -> OAuth2ClientConfig | None:
+    def get_oauth2_scope(cls, database: Database, scope: str) -> str:
+        """Return the OAuth2 scope required for a database connection."""
+        return scope
+
+    @classmethod
+    def get_oauth2_config(
+        cls, database: Database | None = None
+    ) -> OAuth2ClientConfig | None:
         """
         Build the DB engine spec level OAuth2 client config.
+
+        ``database`` is provided so engine specs can select provider-specific
+        settings based on database authentication options.
         """
         oauth2_config = app.config["DATABASE_OAUTH2_CLIENTS"]
         if cls.engine_name not in oauth2_config:
