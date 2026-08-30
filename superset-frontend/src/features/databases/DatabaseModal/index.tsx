@@ -17,7 +17,7 @@
  * under the License.
  */
 import { t } from '@apache-superset/core/translation';
-import { getExtensionsRegistry } from '@superset-ui/core';
+import { ErrorTypeEnum, getExtensionsRegistry } from '@superset-ui/core';
 import { Alert } from '@apache-superset/core/components';
 import { styled, SupersetTheme } from '@apache-superset/core/theme';
 
@@ -823,12 +823,16 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
       (errorMsg: string) => {
         setTestInProgress(false);
         addDangerToast(errorMsg);
-        setHasValidated(false);
       },
       (errorMsg: string) => {
         setTestInProgress(false);
         addSuccessToast(errorMsg);
         setHasValidated(true);
+      },
+      errorType => {
+        setHasValidated(
+          errorType === ErrorTypeEnum.OAUTH2_REQUIRES_SAVED_DATABASE,
+        );
       },
     );
   };

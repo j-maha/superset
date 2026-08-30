@@ -27,6 +27,7 @@ export { InvalidSQLErrorMessage } from './InvalidSQLErrorMessage';
 export { IssueCode } from './IssueCode';
 export { MarshmallowErrorMessage } from './MarshmallowErrorMessage';
 export { OAuth2RedirectMessage } from './OAuth2RedirectMessage';
+export { OAuth2ScopeMismatchMessage } from './OAuth2ScopeMismatchMessage';
 export { ParameterErrorMessage } from './ParameterErrorMessage';
 export { TimeoutErrorMessage } from './TimeoutErrorMessage';
 

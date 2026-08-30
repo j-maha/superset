@@ -1179,6 +1179,8 @@ DATABASE_OAUTH2_CLIENTS = {
                 "https://spreadsheets.google.com/feeds",
             ],
         ),
+        # Optional: "ignore" (default), "subset", or "exact".
+        "scope_matching_policy": "subset",
         "authorization_request_uri": "https://accounts.google.com/o/oauth2/v2/auth",
         "token_request_uri": "https://oauth2.googleapis.com/token",
     },

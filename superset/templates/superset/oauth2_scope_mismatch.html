@@ -16,12 +16,12 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -#}
-{% import "superset/macros.html" as macros %}
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OAuth2 authorization could not be saved</title>
     <style>
       :root {
         color-scheme: light;
@@ -30,63 +30,55 @@ under the License.
         background: #f8fafc;
       }
 
-      html,
-      body {
-        min-height: 100%;
-        margin: 0;
-      }
-
       body {
         display: grid;
         min-height: 100vh;
         place-items: center;
+        margin: 0;
         padding: 24px;
         box-sizing: border-box;
       }
 
       main {
-        width: min(100%, 420px);
+        width: min(100%, 560px);
         padding: 32px;
         box-sizing: border-box;
-        border: 1px solid #e5e7eb;
+        border: 1px solid #fecaca;
         border-radius: 12px;
-        background: #ffffff;
+        background: #fff;
         box-shadow: 0 8px 24px rgb(15 23 42 / 8%);
-        text-align: center;
       }
 
-      h1 {
-        margin: 0 0 12px;
-        font-size: 22px;
-      }
-
-      p {
-        margin: 8px 0;
-        line-height: 1.5;
-      }
-
-      .hint {
-        color: #64748b;
-        font-size: 14px;
-      }
+      h1 { margin-top: 0; font-size: 22px; }
+      p { line-height: 1.5; }
+      dt { font-weight: 600; margin-top: 16px; }
+      dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+      .hint { color: #64748b; font-size: 14px; }
     </style>
   </head>
   <body>
-    <script nonce="{{ macros.get_nonce() }}">
-      const message = { tabId: '{{ tab_id }}' };
-      if (typeof BroadcastChannel !== 'undefined') {
-        const channel = new BroadcastChannel('oauth');
-        channel.postMessage(message);
-        channel.close();
-      }
-      localStorage.setItem('oauth2_auth_complete', JSON.stringify(message));
-      localStorage.removeItem('oauth2_auth_complete');
-      window.close();
-    </script>
-    <main role="status" aria-live="polite">
-      <h1>Authorization complete</h1>
-      <p>Your authorization was saved. You can close this window.</p>
-      <p class="hint">The original Superset tab will continue automatically.</p>
+    <main role="alert" aria-live="assertive">
+      <h1>OAuth2 scope mismatch</h1>
+      <p>
+        Authorization completed, but the provider returned scopes that do not
+        satisfy the configured matching policy. No new token was saved.
+      </p>
+      <dl>
+        <dt>Matching policy</dt>
+        <dd>{{ details.get("policy", "unknown") }}</dd>
+        <dt>Required scopes</dt>
+        <dd>{{ details.get("required_scopes", []) | join(", ") or "None" }}</dd>
+        <dt>Granted scopes</dt>
+        <dd>{{ details.get("granted_scopes", []) | join(", ") or "None" }}</dd>
+        <dt>Missing scopes</dt>
+        <dd>{{ details.get("missing_scopes", []) | join(", ") or "None" }}</dd>
+        <dt>Unexpected scopes</dt>
+        <dd>{{ details.get("unexpected_scopes", []) | join(", ") or "None" }}</dd>
+      </dl>
+      <p class="hint">
+        You can close this window. If the problem persists, please contact your
+        Superset administrator to review the database OAuth2 configuration.
+      </p>
     </main>
   </body>
 </html>
