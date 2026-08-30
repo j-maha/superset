@@ -487,7 +487,7 @@ def test_get_client_reuses_oauth_client_without_opening_connection() -> None:
 
 
 def test_df_to_sql_passes_oauth_client_to_pandas_gbq(
-    mocker: MockerFixture,
+    mocker: MockerFixture, app_context: None
 ) -> None:
     """Impersonated uploads reuse the OAuth client from the private engine."""
     from superset.db_engine_specs.bigquery import BigQueryEngineSpec
@@ -496,19 +496,21 @@ def test_df_to_sql_passes_oauth_client_to_pandas_gbq(
     engine = mock.MagicMock()
     engine.url.host = "google-host"
     engine.dialect.oauth_client = client
+    engine_context = mocker.MagicMock()
+    engine_context.__enter__.return_value = engine
     df = mock.Mock()
     pandas_gbq = mocker.patch(
         "superset.db_engine_specs.bigquery.pandas_gbq", create=True
     )
     mocker.patch("superset.db_engine_specs.bigquery.can_upload", True)
-    mocker.patch.object(
-        BigQueryEngineSpec,
-        "get_engine",
-        return_value=mock.MagicMock(__enter__=mock.Mock(return_value=engine)),
+    mocker.patch.dict(
+        "superset.db_engine_specs.bigquery.current_app.config",
+        {"BIGQUERY_IMPERSONATION_ALLOW_WRITE": True},
     )
+    mocker.patch.object(BigQueryEngineSpec, "get_engine", return_value=engine_context)
 
     BigQueryEngineSpec.df_to_sql(
-        database=mock.Mock(impersonate_user=False),
+        database=mock.Mock(impersonate_user=True),
         table=Table(table="name", schema="schema"),
         df=df,
         to_sql_kwargs={},
@@ -520,6 +522,7 @@ def test_df_to_sql_passes_oauth_client_to_pandas_gbq(
         destination_table="schema.name",
         bigquery_client=client,
     )
+    engine_context.__exit__.assert_called_once()
 
 
 def test_df_to_sql_rejects_impersonated_upload_without_write_scope(
