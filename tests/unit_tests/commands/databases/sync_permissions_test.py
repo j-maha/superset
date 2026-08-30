@@ -16,7 +16,7 @@
 # under the License.
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 from pytest_mock import MockerFixture
@@ -242,6 +242,9 @@ def test_sync_permissions_command_get_catalogs(database_with_catalog: MagicMock)
     """
     cmmd = SyncPermissionsCommand(1, None, db_connection=database_with_catalog)
     assert cmmd._get_catalog_names() == ["catalog1", "catalog2"]
+    database_with_catalog.get_all_catalog_names.assert_called_once_with(
+        force=True, cache=False
+    )
 
 
 def test_sync_permissions_command_get_default_catalog(database_with_catalog: MagicMock):
@@ -292,6 +295,10 @@ def test_sync_permissions_command_get_schemas(database_with_catalog: MagicMock):
     cmmd = SyncPermissionsCommand(1, None, db_connection=database_with_catalog)
     assert cmmd._get_schema_names("catalog1") == ["schema1", "schema2"]
     assert cmmd._get_schema_names("catalog2") == ["schema3", "schema4"]
+    assert database_with_catalog.get_all_schema_names.call_args_list == [
+        call(force=True, cache=False, catalog="catalog1"),
+        call(force=True, cache=False, catalog="catalog2"),
+    ]
 
 
 @pytest.mark.parametrize(

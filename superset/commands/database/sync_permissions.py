@@ -200,7 +200,7 @@ class SyncPermissionsCommand(BaseCommand):
                 self.db_connection.db_engine_spec.supports_cross_catalog_queries
                 or self.db_connection.allow_multi_catalog
             ):
-                return self.db_connection.get_all_catalog_names(force=True)
+                return self.db_connection.get_all_catalog_names(force=True, cache=False)
             else:
                 return {self.db_connection.get_default_catalog()}
         except OAuth2RedirectError:
@@ -214,7 +214,9 @@ class SyncPermissionsCommand(BaseCommand):
         Helper method to load schemas.
         """
         try:
-            return self.db_connection.get_all_schema_names(force=True, catalog=catalog)
+            return self.db_connection.get_all_schema_names(
+                force=True, cache=False, catalog=catalog
+            )
         except OAuth2RedirectError:
             # raise OAuth2 exceptions as-is
             raise

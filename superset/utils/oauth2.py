@@ -174,7 +174,12 @@ def get_oauth2_access_token(
     if token is None:
         return None
 
-    raise_for_oauth2_scope_mismatch(config, token.scope)
+    try:
+        raise_for_oauth2_scope_mismatch(config, token.scope)
+    except OAuth2ScopeMismatchError:
+        db.session.delete(token)
+        db.session.flush()
+        raise
 
     if token.access_token and datetime.now() < token.access_token_expiration:
         return token.access_token
@@ -246,10 +251,19 @@ def refresh_oauth2_token(
             )
             raise
 
-        # store new access token; note that the refresh token might be revoked, in which
-        # case there would be no access token in the response
+        # Store new access token; note that the refresh token might be revoked, in
+        # which case there would be no access token in the response.
         if "access_token" not in token_response:
             return None
+
+        try:
+            raise_for_oauth2_scope_mismatch(
+                config, token_response.get("scope", token.scope)
+            )
+        except OAuth2ScopeMismatchError:
+            db.session.delete(token)
+            db.session.flush()
+            raise
 
         token.access_token = token_response["access_token"]
         token.access_token_expiration = datetime.now() + timedelta(

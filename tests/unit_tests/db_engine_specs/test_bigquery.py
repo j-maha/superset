@@ -508,7 +508,7 @@ def test_df_to_sql_passes_oauth_client_to_pandas_gbq(
     )
 
     BigQueryEngineSpec.df_to_sql(
-        database=mock.Mock(),
+        database=mock.Mock(impersonate_user=False),
         table=Table(table="name", schema="schema"),
         df=df,
         to_sql_kwargs={},
@@ -520,6 +520,26 @@ def test_df_to_sql_passes_oauth_client_to_pandas_gbq(
         destination_table="schema.name",
         bigquery_client=client,
     )
+
+
+def test_df_to_sql_rejects_impersonated_upload_without_write_scope(
+    mocker: MockerFixture, app_context: None
+) -> None:
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.exceptions import SupersetException
+
+    mocker.patch.dict(
+        "superset.db_engine_specs.bigquery.current_app.config",
+        {"BIGQUERY_IMPERSONATION_ALLOW_WRITE": False},
+    )
+
+    with pytest.raises(SupersetException, match="BIGQUERY_IMPERSONATION_ALLOW_WRITE"):
+        BigQueryEngineSpec.df_to_sql(
+            database=mock.Mock(impersonate_user=True),
+            table=Table(table="name", schema="schema"),
+            df=mock.Mock(),
+            to_sql_kwargs={},
+        )
 
 
 def test_get_time_partition_column_uses_catalog_in_table_reference(
@@ -1208,6 +1228,38 @@ def test_get_oauth2_config_uses_readonly_scope_for_impersonation(
 
     assert config is not None
     assert config["scope"] == BigQueryEngineSpec.oauth2_readonly_scope
+    assert config["scope_matching_policy"] == "exact"
+
+
+def test_get_oauth2_config_allows_explicit_scope_policy(
+    mocker: MockerFixture, app_context: None
+) -> None:
+    from superset.models.core import Database
+
+    mocker.patch.dict(
+        "superset.db_engine_specs.bigquery.current_app.config",
+        {
+            "DATABASE_OAUTH2_CLIENTS": {
+                "Google BigQuery": {
+                    "id": "client-id",
+                    "secret": "client-secret",
+                    "scope": "openid https://www.googleapis.com/auth/bigquery",
+                    "scope_matching_policy": "ignore",
+                }
+            },
+            "BIGQUERY_IMPERSONATION_ALLOW_WRITE": False,
+        },
+    )
+    database = Database(
+        database_name="bigquery",
+        sqlalchemy_uri="bigquery://demo-project",
+        impersonate_user=True,
+    )
+
+    config = database.get_oauth2_config()
+
+    assert config is not None
+    assert config["scope_matching_policy"] == "ignore"
 
 
 def test_get_oauth2_config_allows_write_scope_when_configured(

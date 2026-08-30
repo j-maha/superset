@@ -936,7 +936,8 @@ You should then be able to connect to your BigQuery datasets.
 When BigQuery is configured for per-user OAuth impersonation, Superset requests the
 `https://www.googleapis.com/auth/bigquery.readonly` scope by default. This keeps tokens
 issued by Superset read-only even when the impersonated user has write permissions in
-other contexts.
+other contexts. Returned scopes are matched exactly by default for impersonated BigQuery
+connections; an explicit per-client `scope_matching_policy` can override this behavior.
 
 To allow impersonated users to perform BigQuery write operations through Superset,
 explicitly opt in from `superset_config.py`:
@@ -945,14 +946,17 @@ explicitly opt in from `superset_config.py`:
 BIGQUERY_IMPERSONATION_ALLOW_WRITE = True
 ```
 
-Changing this setting does not reuse an incompatible stored token. Users must authorize
-again so Superset can obtain a token with the configured scope.
+Changing this setting invalidates incompatible stored tokens. Users must authorize
+again so Superset can obtain a token with the configured scope. BigQuery file uploads
+also require this write opt-in, `allow_file_upload` on the database, the required
+BigQuery IAM permissions, and the [pandas_gbq](https://github.com/pydata/pandas-gbq)
+library.
+
+Metadata caching is disabled for impersonated databases because catalog, schema, and
+table visibility can depend on the authorized Google identity.
 
 
 ![CleanShot 2021-10-22 at 04 47 08](https://user-images.githubusercontent.com/52086618/138354340-df57f477-d3e5-42d4-b032-d901c69d2213.gif)
-
-To be able to upload CSV or Excel files to BigQuery in Superset, you'll need to also add the
-[pandas_gbq](https://github.com/pydata/pandas-gbq) library.
 
 Currently, the Google BigQuery Python SDK is not compatible with `gevent`, due to some dynamic monkeypatching on python core library by `gevent`.
 So, when you deploy Superset with `gunicorn` server, you have to use worker type except `gevent`.

@@ -272,7 +272,37 @@ def test_get_oauth2_access_token_preserves_token_with_stale_scope(
         )
 
     assert "scope matching policy" in str(exc_info.value)
-    db.session.delete.assert_not_called()
+    db.session.delete.assert_called_once_with(token)
+    db.session.flush.assert_called_once_with()
+
+
+def test_refresh_oauth2_token_deletes_token_on_scope_mismatch(
+    mocker: MockerFixture,
+) -> None:
+    db = mocker.patch("superset.utils.oauth2.db")
+    mocker.patch("superset.utils.oauth2.DistributedLock")
+    db_engine_spec = mocker.MagicMock()
+    db_engine_spec.get_oauth2_fresh_token.return_value = {
+        "access_token": "new-access-token",
+        "expires_in": 3600,
+        "scope": "scope-b",
+    }
+    token = mocker.MagicMock()
+    token.access_token = None
+    token.refresh_token = "refresh-token"  # noqa: S105
+    token.scope = "scope-a"
+    db.session.query().filter_by().one_or_none.return_value = token
+
+    config = cast(
+        OAuth2ClientConfig,
+        {"scope": "scope-a", "scope_matching_policy": "exact"},
+    )
+    with pytest.raises(OAuth2ScopeMismatchError):
+        refresh_oauth2_token(config, 1, 1, db_engine_spec)
+
+    db.session.delete.assert_called_once_with(token)
+    db.session.flush.assert_called_once_with()
+    db.session.add.assert_not_called()
 
 
 def test_refresh_oauth2_token_deletes_token_on_oauth2_exception(

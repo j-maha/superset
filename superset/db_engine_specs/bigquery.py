@@ -58,7 +58,10 @@ from superset.db_engine_specs.exceptions import (
 from superset.errors import SupersetError, SupersetErrorType
 from superset.exceptions import OAuth2RedirectError, SupersetException
 from superset.sql.parse import SQLScript, Table
-from superset.superset_typing import ResultSetColumnType
+from superset.superset_typing import (
+    OAuth2ScopeMatchingPolicy,
+    ResultSetColumnType,
+)
 from superset.utils import core as utils, json
 from superset.utils.hashing import hash_from_str
 
@@ -253,6 +256,9 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
 
     supports_oauth2 = True
     oauth2_scope = "openid https://www.googleapis.com/auth/bigquery"
+    oauth2_impersonation_scope_matching_policy: OAuth2ScopeMatchingPolicy = (
+        "exact"
+    )
     oauth2_token_response_scope_optional = False
     oauth2_readonly_scope = "openid https://www.googleapis.com/auth/bigquery.readonly"
     oauth2_authorization_request_uri = "https://accounts.google.com/o/oauth2/auth"
@@ -717,6 +723,14 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         :param df: The dataframe with data to be uploaded
         :param to_sql_kwargs: The kwargs to be passed to pandas.DataFrame.to_sql` method
         """
+        if database.impersonate_user and not current_app.config[
+            "BIGQUERY_IMPERSONATION_ALLOW_WRITE"
+        ]:
+            raise SupersetException(
+                "BigQuery uploads for impersonated users require "
+                "BIGQUERY_IMPERSONATION_ALLOW_WRITE=True."
+            )
+
         if not can_upload:
             raise SupersetException(
                 "Could not import libraries needed to upload data to BigQuery."

@@ -324,6 +324,11 @@ def test_catalog_cache() -> None:
     assert database.catalog_cache_enabled
     assert database.catalog_cache_timeout == 10
 
+    database.impersonate_user = True
+    assert not database.catalog_cache_enabled
+    assert not database.schema_cache_enabled
+    assert not database.table_cache_enabled
+
 
 def test_get_default_catalog() -> None:
     """

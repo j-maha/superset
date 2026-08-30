@@ -602,6 +602,7 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
     # the user impersonation methods to handle personal tokens.
     supports_oauth2 = False
     oauth2_scope = ""
+    oauth2_impersonation_scope_matching_policy: OAuth2ScopeMatchingPolicy | None = None
     # Providers may omit scope from the token response when it matches the request.
     # Engine specs can opt out when the provider documents a scope response.
     oauth2_token_response_scope_optional = True
@@ -759,9 +760,16 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
 
         db_engine_spec_config = oauth2_config[cls.engine_name]
         redirect_uri = get_oauth2_redirect_uri()
+        default_scope_matching_policy = app.config[
+            "DATABASE_OAUTH2_SCOPE_MATCHING_POLICY"
+        ]
+        if database and database.impersonate_user:
+            default_scope_matching_policy = (
+                cls.oauth2_impersonation_scope_matching_policy
+                or default_scope_matching_policy
+            )
         scope_matching_policy = db_engine_spec_config.get(
-            "scope_matching_policy",
-            app.config["DATABASE_OAUTH2_SCOPE_MATCHING_POLICY"],
+            "scope_matching_policy", default_scope_matching_policy
         )
         if scope_matching_policy not in {"ignore", "subset", "exact"}:
             raise OAuth2Error(

@@ -376,7 +376,10 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
 
     @property
     def catalog_cache_enabled(self) -> bool:
-        return "catalog_cache_timeout" in self.metadata_cache_timeout
+        return (
+            not self.impersonate_user
+            and "catalog_cache_timeout" in self.metadata_cache_timeout
+        )
 
     @property
     def catalog_cache_timeout(self) -> int | None:
@@ -384,7 +387,10 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
 
     @property
     def schema_cache_enabled(self) -> bool:
-        return "schema_cache_timeout" in self.metadata_cache_timeout
+        return (
+            not self.impersonate_user
+            and "schema_cache_timeout" in self.metadata_cache_timeout
+        )
 
     @property
     def schema_cache_timeout(self) -> int | None:
@@ -392,7 +398,10 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
 
     @property
     def table_cache_enabled(self) -> bool:
-        return "table_cache_timeout" in self.metadata_cache_timeout
+        return (
+            not self.impersonate_user
+            and "table_cache_timeout" in self.metadata_cache_timeout
+        )
 
     @property
     def table_cache_timeout(self) -> int | None:
@@ -1409,6 +1418,14 @@ class Database(CoreDatabase, AuditMixinNullable, ImportExportMixin):  # pylint: 
         if oauth2_client_info := encrypted_extra.get("oauth2_client_info"):
             schema = OAuth2ClientConfigSchema()
             client_config = schema.load(oauth2_client_info)
+            if (
+                self.impersonate_user
+                and "scope_matching_policy" not in oauth2_client_info
+                and self.db_engine_spec.oauth2_impersonation_scope_matching_policy
+            ):
+                client_config["scope_matching_policy"] = (
+                    self.db_engine_spec.oauth2_impersonation_scope_matching_policy
+                )
             if "request_content_type" not in oauth2_client_info:
                 client_config["request_content_type"] = (
                     self.db_engine_spec.oauth2_token_request_type
