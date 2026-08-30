@@ -19,9 +19,14 @@
 
 import base64
 import hashlib
-from contextlib import nullcontext
-from datetime import datetime
-from typing import cast
+import json
+from contextlib import contextmanager, nullcontext
+from datetime import datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
+from typing import Iterator, cast
+from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
 import pytest
 from freezegun import freeze_time
@@ -42,6 +47,85 @@ from superset.utils.oauth2 import (
     get_oauth2_redirect_uri,
     refresh_oauth2_token,
 )
+
+
+@contextmanager
+def local_oauth_provider(
+    code_verifier: str,
+) -> Iterator[tuple[str, list[dict[str, str]]]]:
+    """Run a local OAuth provider that validates authorization-code requests."""
+    requests_received: list[dict[str, str]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            content_length = int(self.headers["Content-Length"] or 0)
+            body = self.rfile.read(content_length).decode()
+            if self.headers.get_content_type() == "application/json":
+                request_data = json.loads(body)
+            else:
+                request_data = {
+                    key: values[0]
+                    for key, values in parse_qs(body, keep_blank_values=True).items()
+                }
+            requests_received.append(request_data)
+
+            if self.path != "/token":
+                self.send_error(404)
+                return
+
+            if request_data.get("grant_type") == "authorization_code":
+                if (
+                    request_data.get("code") != "authorization-code"
+                    or request_data.get("code_verifier") != code_verifier
+                ):
+                    self.send_error(400, "invalid authorization code request")
+                    return
+                response = {
+                    "access_token": "local-access-token",
+                    "expires_in": 3600,
+                    "refresh_token": "local-refresh-token",
+                    "scope": "scope-a",
+                }
+            elif request_data.get("grant_type") == "refresh_token":
+                if request_data.get("refresh_token") != "local-refresh-token":
+                    self.send_error(400, "invalid refresh token")
+                    return
+                response = {
+                    "access_token": "refreshed-access-token",
+                    "expires_in": 3600,
+                    "refresh_token": "local-refresh-token",
+                    "scope": "scope-a",
+                }
+            else:
+                self.send_error(400, "unsupported grant type")
+                return
+
+            response_body = json.dumps(response).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response_body)))
+            self.end_headers()
+            self.wfile.write(response_body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/token", requests_received
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+class LocalOAuth2ProviderEngineSpec(BaseEngineSpec):
+    """Engine spec used to exercise the real OAuth HTTP and persistence flow."""
+
+    engine = "local_oauth2_provider"
+
 
 DUMMY_OAUTH2_CONFIG = cast(OAuth2ClientConfig, {})
 
@@ -236,6 +320,149 @@ def test_get_oauth2_access_token_persists_refresh(
     assert token.access_token == "new-access-token"  # noqa: S105
     assert token.access_token_expiration == datetime(2024, 1, 2, 1)
     assert token.refresh_token == "new-refresh-token"  # noqa: S105
+
+
+def test_oauth2_callback_exchange_persists_and_refreshes_with_local_provider(
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise callback exchange, PKCE cleanup, persistence, and refresh locally."""
+    from flask_appbuilder.security.sqla.models import User
+
+    from superset.commands.database.oauth2 import OAuth2StoreTokenCommand
+    from superset.daos.key_value import KeyValueDAO
+    from superset.key_value.models import KeyValueEntry
+    from superset.key_value.types import JsonKeyValueCodec, KeyValueResource
+    from superset.models.core import Database, DatabaseUserOAuth2Tokens
+
+    Database.metadata.create_all(session.get_bind())  # pylint: disable=no-member
+    KeyValueEntry.metadata.create_all(session.get_bind())  # pylint: disable=no-member
+
+    user = User(
+        first_name="Local",
+        last_name="OAuth",
+        email="local-oauth@example.org",
+        username="local-oauth",
+    )
+    database = Database(
+        database_name="local_oauth_db",
+        sqlalchemy_uri="sqlite://",
+        encrypted_extra=json.dumps(
+            {
+                "oauth2_client_info": {
+                    "id": "client-id",
+                    "secret": "client-secret",
+                    "scope": "scope-a",
+                    "scope_matching_policy": "exact",
+                    "authorization_request_uri": "http://unused/authorize",
+                    "token_request_uri": "http://unused/token",
+                    "request_content_type": "data",
+                    "redirect_uri": "http://superset.test/oauth2/callback",
+                }
+            }
+        ),
+    )
+    session.add_all([user, database])
+    session.flush()
+
+    code_verifier = generate_code_verifier()
+    tab_id = uuid4()
+    state = {
+        "database_id": database.id,
+        "user_id": user.id,
+        "default_redirect_uri": "http://superset.test/oauth2/callback",
+        "tab_id": str(tab_id),
+    }
+
+    with local_oauth_provider(code_verifier) as (token_uri, requests_received):
+        database.encrypted_extra = json.dumps(
+            {
+                "oauth2_client_info": {
+                    "id": "client-id",
+                    "secret": "client-secret",
+                    "scope": "scope-a",
+                    "scope_matching_policy": "exact",
+                    "authorization_request_uri": "http://unused/authorize",
+                    "token_request_uri": token_uri,
+                    "request_content_type": "data",
+                    "redirect_uri": "http://superset.test/oauth2/callback",
+                }
+            }
+        )
+        session.flush()
+        config = database.get_oauth2_config()
+        assert config is not None
+
+        authorization_uri = LocalOAuth2ProviderEngineSpec.get_oauth2_authorization_uri(
+            config,
+            state,
+            code_verifier=code_verifier,
+        )
+        authorization_query = parse_qs(urlparse(authorization_uri).query)
+        assert authorization_query["code_challenge_method"] == ["S256"]
+        assert authorization_query["code_challenge"] == [
+            generate_code_challenge(code_verifier)
+        ]
+
+        KeyValueDAO.create_entry(
+            resource=KeyValueResource.PKCE_CODE_VERIFIER,
+            key=tab_id,
+            value={"code_verifier": code_verifier},
+            codec=JsonKeyValueCodec(),
+        )
+        session.flush()
+        monkeypatch.setattr(
+            "superset.utils.oauth2.DistributedLock",
+            lambda **_: nullcontext(),
+        )
+
+        result = OAuth2StoreTokenCommand(
+            {
+                "code": "authorization-code",
+                "state": encode_oauth2_state(state),
+            }
+        ).run()
+
+        assert result.access_token == "local-access-token"  # noqa: S105
+        assert result.refresh_token == "local-refresh-token"  # noqa: S105
+        assert result.scope == "scope-a"
+        assert (
+            KeyValueDAO.get_value(
+                KeyValueResource.PKCE_CODE_VERIFIER,
+                tab_id,
+                JsonKeyValueCodec(),
+            )
+            is None
+        )
+        assert requests_received == [
+            {
+                "code": "authorization-code",
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "redirect_uri": "http://superset.test/oauth2/callback",
+                "grant_type": "authorization_code",
+                "code_verifier": code_verifier,
+            }
+        ]
+
+        stored_token = (
+            session.query(DatabaseUserOAuth2Tokens)
+            .filter_by(user_id=user.id, database_id=database.id)
+            .one()
+        )
+        stored_token.access_token_expiration = datetime(2020, 1, 1)
+        session.flush()
+
+        assert (
+            get_oauth2_access_token(config, database.id, user.id, LocalOAuth2ProviderEngineSpec)
+            == "refreshed-access-token"
+        )
+        assert requests_received[-1] == {
+            "client_id": "client-id",
+            "client_secret": "client-secret",
+            "refresh_token": "local-refresh-token",
+            "grant_type": "refresh_token",
+        }
 
 
 def test_get_oauth2_access_token_base_no_refresh(mocker: MockerFixture) -> None:
