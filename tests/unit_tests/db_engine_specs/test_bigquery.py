@@ -1176,6 +1176,17 @@ def test_extended_dialect_keeps_oauth_token_out_of_url() -> None:
         assert client.call_args.kwargs["credentials"].token == "synthetic-token"  # noqa: S105
 
 
+def test_extended_dialect_requires_token_for_impersonation() -> None:
+    """The impersonation dialect must reject connections without a token."""
+    from superset.db_engine_specs.bigquery_dialect import ExtendedQueryDialect
+    from superset.db_engine_specs.exceptions import BigQueryOAuth2TokenRequiredError
+
+    dialect = ExtendedQueryDialect(oauth_token_provider=lambda: None)
+
+    with pytest.raises(BigQueryOAuth2TokenRequiredError, match="access token"):
+        dialect.create_connect_args(make_url("bigquery+extended://demo-project"))
+
+
 def test_needs_oauth2_when_impersonation_token_is_missing(
     app_context: None,
 ) -> None:

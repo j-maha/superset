@@ -172,9 +172,15 @@ def test_get_oauth2_access_token_base_refresh(mocker: MockerFixture) -> None:
     db.session.add.assert_called_with(token)
 
 
+@pytest.mark.parametrize(
+    "access_token_expiration",
+    [datetime(2024, 1, 1), None],
+    ids=["expired", "legacy-null-expiration"],
+)
 def test_get_oauth2_access_token_persists_refresh(
     session: Session,
     monkeypatch: pytest.MonkeyPatch,
+    access_token_expiration: datetime | None,
 ) -> None:
     """Persist refreshed access and refresh tokens through the real ORM session."""
     from flask_appbuilder.security.sqla.models import User
@@ -200,7 +206,7 @@ def test_get_oauth2_access_token_persists_refresh(
             user_id=user.id,
             database_id=database.id,
             access_token="expired-access-token",  # noqa: S106
-            access_token_expiration=datetime(2024, 1, 1),
+            access_token_expiration=access_token_expiration,
             refresh_token="old-refresh-token",  # noqa: S106
         )
     )

@@ -181,7 +181,11 @@ def get_oauth2_access_token(
         db.session.flush()
         raise
 
-    if token.access_token and datetime.now() < token.access_token_expiration:
+    if (
+        token.access_token
+        and token.access_token_expiration
+        and datetime.now() < token.access_token_expiration
+    ):
         return token.access_token
 
     if token.refresh_token:
@@ -218,7 +222,11 @@ def refresh_oauth2_token(
         if token is None:
             return None
 
-        if token.access_token and datetime.now() < token.access_token_expiration:
+        if (
+            token.access_token
+            and token.access_token_expiration
+            and datetime.now() < token.access_token_expiration
+        ):
             return token.access_token
 
         if not token.refresh_token:
