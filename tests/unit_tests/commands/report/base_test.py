@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from functools import wraps
+from types import SimpleNamespace
 from typing import Any, Callable
 from unittest.mock import patch
 
@@ -293,3 +294,54 @@ def test_validate_report_frequency_using_callable() -> None:
         "1,6 * * * *",
         ReportScheduleType.REPORT,
     )
+
+
+@pytest.mark.parametrize(
+    "properties",
+    [
+        {"database": SimpleNamespace(impersonate_user=True)},
+        {
+            "chart": SimpleNamespace(
+                datasource=SimpleNamespace(
+                    database=SimpleNamespace(impersonate_user=True)
+                )
+            )
+        },
+        {
+            "dashboard": SimpleNamespace(
+                datasources=[
+                    SimpleNamespace(database=SimpleNamespace(impersonate_user=True))
+                ]
+            )
+        },
+    ],
+)
+def test_validate_no_impersonated_databases_rejects_all_source_types(
+    properties: dict[str, Any],
+) -> None:
+    from superset.commands.report.base import validate_no_impersonated_databases
+    from superset.commands.report.exceptions import (
+        ReportScheduleImpersonatedDatabaseValidationError,
+    )
+
+    errors = validate_no_impersonated_databases(properties)
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], ReportScheduleImpersonatedDatabaseValidationError)
+
+
+def test_validate_no_impersonated_databases_allows_regular_database() -> None:
+    from superset.commands.report.base import validate_no_impersonated_databases
+
+    database = SimpleNamespace(impersonate_user=False)
+
+    assert validate_no_impersonated_databases({"database": database}) == []
+
+
+def test_validate_no_impersonated_databases_checks_persisted_schedule() -> None:
+    from superset.commands.report.base import validate_no_impersonated_databases
+
+    database = SimpleNamespace(impersonate_user=True)
+    schedule = SimpleNamespace(database=database)
+
+    assert validate_no_impersonated_databases({}, schedule)

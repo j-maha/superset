@@ -131,7 +131,11 @@ class DummyStrategy(Strategy):  # pylint: disable=too-few-public-methods
             .all()
         )
 
-        return [get_dash_url(dashboard) for dashboard in dashboards if dashboard.slices]
+        return [
+            get_dash_url(dashboard)
+            for dashboard in dashboards
+            if dashboard.slices and not _dashboard_uses_impersonated_database(dashboard)
+        ]
 
 
 class TopNDashboardsStrategy(Strategy):  # pylint: disable=too-few-public-methods
@@ -173,7 +177,7 @@ class TopNDashboardsStrategy(Strategy):  # pylint: disable=too-few-public-method
             db.session.query(Dashboard).filter(Dashboard.id.in_(dash_ids)).all()
         )
 
-        return [get_dash_url(dashboard) for dashboard in dashboards]
+        return _get_non_impersonated_dashboard_urls(dashboards)
 
 
 class DashboardTagsStrategy(Strategy):  # pylint: disable=too-few-public-methods
@@ -217,11 +221,10 @@ class DashboardTagsStrategy(Strategy):  # pylint: disable=too-few-public-methods
         dash_ids: list[int] = [
             tagged_object.object_id for tagged_object in tagged_objects
         ]
-        tagged_dashboards: list[Dashboard] = db.session.query(Dashboard).filter(
-            Dashboard.id.in_(dash_ids)
+        tagged_dashboards: list[Dashboard] = (
+            db.session.query(Dashboard).filter(Dashboard.id.in_(dash_ids)).all()
         )
-        for dashboard in tagged_dashboards:
-            urls.append(get_dash_url(dashboard))
+        urls.extend(_get_non_impersonated_dashboard_urls(tagged_dashboards))
 
         return urls
 
@@ -327,6 +330,67 @@ strategy_registry: dict[str, type[Strategy]] = {
 }
 
 
+def _dashboard_uses_impersonated_database(dashboard: Dashboard) -> bool:
+    """Return whether a dashboard uses a user-impersonated database."""
+    return any(
+        getattr(getattr(datasource, "database", None), "impersonate_user", False)
+        for datasource in dashboard.datasources
+    )
+
+
+def _get_non_impersonated_dashboard_urls(
+    dashboards: list[Dashboard],
+) -> list[str]:
+    """Return dashboard URLs that can be warmed by the shared cache user."""
+    return [
+        get_dash_url(dashboard)
+        for dashboard in dashboards
+        if not _dashboard_uses_impersonated_database(dashboard)
+    ]
+
+
+def _uses_impersonated_database(task: CacheWarmupTask) -> bool:
+    """Return whether a warmup task targets a user-impersonated database."""
+    database = getattr(task.query_context.datasource, "database", None)
+    return bool(getattr(database, "impersonate_user", False))
+
+
+def _warm_up_query_tasks(
+    strategy: Strategy,
+    user: Any,
+) -> dict[str, list[str]]:
+    """Warm eligible query tasks for the configured warmup user."""
+    # pylint: disable=import-outside-toplevel
+    from superset.commands.chart.data.get_data_command import ChartDataCommand
+    from superset.utils.core import override_user
+
+    results: dict[str, list[str]] = {"success": [], "errors": []}
+    with override_user(user, force=False):
+        tasks: list[CacheWarmupTask] = strategy.get_tasks()
+        for task in tasks:
+            task_name: str = (
+                f"dashboard:{task.dashboard_id}:native_filter:{task.native_filter_id}"
+            )
+            if _uses_impersonated_database(task):
+                logger.info(
+                    "Skipping cache warmup for impersonated database: %s",
+                    task_name,
+                )
+                continue
+
+            try:
+                logger.info("Warming up cache for %s", task_name)
+                command: Any = ChartDataCommand(task.query_context)
+                command.validate()
+                command.run(cache=True)
+                results["success"].append(task_name)
+            except Exception:  # noqa: BLE001
+                logger.exception("Error warming up cache for %s", task_name)
+                results["errors"].append(task_name)
+
+    return results
+
+
 @celery_app.task(name="cache-warmup")
 def cache_warmup(
     strategy_name: str, *args: Any, **kwargs: Any
@@ -374,28 +438,7 @@ def cache_warmup(
         return message
 
     if not strategy.uses_webdriver:
-        # pylint: disable=import-outside-toplevel
-        from superset.commands.chart.data.get_data_command import ChartDataCommand
-        from superset.utils.core import override_user
-
-        with override_user(user, force=False):
-            tasks: list[CacheWarmupTask] = strategy.get_tasks()
-            for task in tasks:
-                task_name: str = (
-                    f"dashboard:{task.dashboard_id}:"
-                    f"native_filter:{task.native_filter_id}"
-                )
-                try:
-                    logger.info("Warming up cache for %s", task_name)
-                    command: Any = ChartDataCommand(task.query_context)
-                    command.validate()
-                    command.run(cache=True)
-                    results["success"].append(task_name)
-                except Exception:  # noqa: BLE001
-                    logger.exception("Error warming up cache for %s", task_name)
-                    results["errors"].append(task_name)
-
-        return results
+        return _warm_up_query_tasks(strategy, user)
 
     wd: WebDriverSelenium = WebDriverSelenium(
         current_app.config["WEBDRIVER_TYPE"], user=user

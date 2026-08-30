@@ -14,32 +14,26 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from superset.exceptions import SupersetException
+"""Store OAuth2 token scopes.
+
+Revision ID: f6a7b8c9d0e1
+Revises: e5f6a7b8c9d0
+Create Date: 2026-08-09 12:00:00.000000
+"""
+
+import sqlalchemy as sa
+from alembic import op
+
+revision = "f6a7b8c9d0e1"
+down_revision = "e5f6a7b8c9d0"
 
 
-class SupersetDBAPIError(SupersetException):
-    pass
+def upgrade() -> None:
+    op.add_column(
+        "database_user_oauth2_tokens",
+        sa.Column("scope", sa.Text(), nullable=True),
+    )
 
 
-class SupersetDBAPIDataError(SupersetDBAPIError):
-    pass
-
-
-class SupersetDBAPIDatabaseError(SupersetDBAPIError):
-    pass
-
-
-class SupersetDBAPIConnectionError(SupersetDBAPIError):
-    pass
-
-
-class SupersetDBAPIOperationalError(SupersetDBAPIError):
-    pass
-
-
-class SupersetDBAPIProgrammingError(SupersetDBAPIError):
-    status = 400
-
-
-class BigQueryOAuth2TokenRequiredError(SupersetDBAPIConnectionError):
-    """Raised when BigQuery impersonation has no current user token."""
+def downgrade() -> None:
+    op.drop_column("database_user_oauth2_tokens", "scope")

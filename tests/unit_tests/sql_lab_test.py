@@ -26,10 +26,9 @@ from freezegun import freeze_time
 from pytest_mock import MockerFixture
 
 from superset.app import SupersetApp
-from superset.common.db_query_status import QueryStatus
 from superset.db_engine_specs.postgres import PostgresEngineSpec
 from superset.errors import ErrorLevel, SupersetErrorType
-from superset.exceptions import OAuth2Error, SupersetErrorException
+from superset.exceptions import OAuth2Error, OAuth2RedirectError, SupersetErrorException
 from superset.models.core import Database
 from superset.sql.parse import SQLStatement, Table
 from superset.sql_lab import (
@@ -442,22 +441,26 @@ def test_get_sql_results_oauth2(mocker: MockerFixture, app) -> None:
     query = mocker.MagicMock(select_as_cta=False, database=database)
     mocker.patch("superset.sql_lab.get_query", return_value=query)
 
-    payload = get_sql_results(query_id=1, rendered_query="SELECT 1")
-    assert payload["status"] == QueryStatus.FAILED
-    assert payload["error"] == "You don't have permission to access the data."
-    assert len(payload["errors"]) == 1
+    with pytest.raises(OAuth2RedirectError) as excinfo:
+        get_sql_results(
+            query_id=1,
+            rendered_query="SELECT 1",
+            base_url="http://localhost:8088/",
+        )
 
-    error = payload["errors"][0]
-    assert error["message"] == "You don't have permission to access the data."
-    assert error["error_type"] == SupersetErrorType.OAUTH2_REDIRECT
-    assert error["level"] == ErrorLevel.WARNING
-    assert error["extra"]["tab_id"] == "fb11f528-6eba-4a8a-837e-6b0d39ee9187"
-    assert error["extra"]["redirect_uri"] == "http://localhost/api/v1/database/oauth2/"
+    error = excinfo.value.error
+    assert error.message == "You don't have permission to access the data."
+    assert error.error_type == SupersetErrorType.OAUTH2_REDIRECT
+    assert error.level == ErrorLevel.WARNING
+    assert error.extra["tab_id"] == "fb11f528-6eba-4a8a-837e-6b0d39ee9187"
+    assert error.extra["redirect_uri"] == (
+        "http://localhost:8088/api/v1/database/oauth2/"
+    )
 
     # Parse the OAuth2 authorization URL and verify components individually,
     # since the JWT state and PKCE code_challenge are computed deterministically
     # from mocked inputs but their exact encoding depends on library internals.
-    url = urlparse(error["extra"]["url"])
+    url = urlparse(error.extra["url"])
     assert url.scheme == "https"
     assert url.netloc == "abcd1234.snowflakecomputing.com"
     assert url.path == "/oauth/authorize"
@@ -465,7 +468,9 @@ def test_get_sql_results_oauth2(mocker: MockerFixture, app) -> None:
     params = parse_qs(url.query)
     assert params["scope"] == ["refresh_token session:role:USERADMIN"]
     assert params["response_type"] == ["code"]
-    assert params["redirect_uri"] == ["http://localhost/api/v1/database/oauth2/"]
+    assert params["redirect_uri"] == [
+        "http://localhost:8088/api/v1/database/oauth2/"
+    ]
     assert params["client_id"] == ["my_client_id"]
     assert params["code_challenge_method"] == ["S256"]
 

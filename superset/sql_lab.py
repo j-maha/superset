@@ -182,9 +182,10 @@ def get_sql_results(  # pylint: disable=too-many-arguments
     start_time: Optional[float] = None,
     expand_data: bool = False,
     log_params: Optional[dict[str, Any]] = None,
+    base_url: str | None = None,
 ) -> Optional[dict[str, Any]]:
     """Executes the sql query returns the results."""
-    with app.test_request_context():
+    with app.test_request_context(base_url=base_url):
         with override_user(security_manager.find_user(username)):
             try:
                 return execute_sql_statements(
@@ -196,6 +197,9 @@ def get_sql_results(  # pylint: disable=too-many-arguments
                     expand_data=expand_data,
                     log_params=log_params,
                 )
+            except OAuth2RedirectError:
+                # Preserve the redirect so the client can complete authorization.
+                raise
             except Exception as ex:  # pylint: disable=broad-except
                 logger.exception("Query %d: %s", query_id, ex)
                 stats_logger = app.config["STATS_LOGGER"]

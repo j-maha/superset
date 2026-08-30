@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { useEffect } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 
 import { useDispatch, useSelector } from 'react-redux';
 import { QueryEditor, SqlLabRootState } from 'src/SqlLab/types';
@@ -29,6 +29,7 @@ import { UNSAVED_CHART_ID } from 'src/explore/constants';
 import { api } from 'src/hooks/apiResources/queryApi';
 import { t } from '@apache-superset/core/translation';
 import { QueryResponse } from '@superset-ui/core';
+import { navigateTo } from 'src/utils/navigationUtils';
 
 import type { ErrorMessageComponentProps } from './types';
 import { ErrorAlert } from './ErrorAlert';
@@ -69,6 +70,8 @@ export function OAuth2RedirectMessage({
   closable,
 }: ErrorMessageComponentProps<OAuth2RedirectExtra>) {
   const { extra, level } = error;
+  const [completedTabId, setCompletedTabId] = useState<string | null>(null);
+  const isAuthorizationComplete = completedTabId === extra.tab_id;
 
   // state needed for re-running the SQL Lab query
   const queries = useSelector<
@@ -109,6 +112,7 @@ export function OAuth2RedirectMessage({
       if (tabId !== extra.tab_id) {
         return;
       }
+      setCompletedTabId(tabId);
       if (source === 'sqllab' && query) {
         dispatch(reRunQuery(query));
       } else if (source === 'explore') {
@@ -158,17 +162,38 @@ export function OAuth2RedirectMessage({
     };
   }, [source, extra.tab_id, dispatch, query, chartId, chartList, dashboardId]);
 
+  const handleAuthorizationClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    navigateTo(extra.url, { newWindow: true });
+  };
+
+  if (isAuthorizationComplete) {
+    return null;
+  }
+
   const body = (
-    <p>
-      {t(
-        'This database uses OAuth2 for authentication. Please click the link above to grant Apache Superset permission to access the data. Your personal access token will be stored encrypted and used only for queries run by you.',
-      )}
-    </p>
+    <>
+      <p>
+        {t(
+          'This database uses OAuth2 for authentication. Please click the link above to grant Apache Superset permission to access the data. Your personal access token will be stored encrypted and used only for queries run by you.',
+        )}
+      </p>
+      <p>
+        {t(
+          'If the authorization window does not open, allow pop-ups for this site and click the authorization link again. After authorizing, return to this tab and retry if the operation does not resume automatically.',
+        )}
+      </p>
+    </>
   );
   const subtitle = (
     <>
       {t('You need to')}{' '}
-      <a href={extra.url} target="_blank" rel="noreferrer">
+      <a
+        href={extra.url}
+        target="_blank"
+        rel="noreferrer"
+        onClick={handleAuthorizationClick}
+      >
         {t('provide authorization')}
       </a>{' '}
       {t('in order to run this operation.')}

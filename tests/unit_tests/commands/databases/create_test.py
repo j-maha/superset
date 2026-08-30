@@ -155,3 +155,24 @@ def test_create_with_oauth2(
     ).run()
 
     add_permission_view_menu.assert_not_called()
+
+
+def test_create_with_oauth2_during_permission_sync(
+    mocker: MockerFixture,
+    database_without_catalog: MockerFixture,
+) -> None:
+    """Test that OAuth permission sync failures do not undo database creation."""
+    database_without_catalog.db_engine_spec.needs_oauth2.return_value = True
+    mocker.patch(
+        "superset.commands.database.create.add_permissions",
+        side_effect=ValueError("An OAuth2 access token is required for impersonation"),
+    )
+
+    database = CreateDatabaseCommand(
+        {
+            "database_name": "test_database",
+            "sqlalchemy_uri": "sqlite://",
+        }
+    ).run()
+
+    assert database is database_without_catalog

@@ -33,7 +33,12 @@ from werkzeug.routing import BuildError
 
 from superset import db
 from superset.distributed_lock import DistributedLock
-from superset.exceptions import AcquireDistributedLockFailedException, OAuth2Error
+from superset.exceptions import (
+    AcquireDistributedLockFailedException,
+    OAuth2Error,
+    OAuth2RequiresSavedDBError,
+    OAuth2ScopeMismatchError,
+)
 from superset.superset_typing import OAuth2ClientConfig, OAuth2State
 
 if TYPE_CHECKING:
@@ -76,6 +81,63 @@ def generate_code_challenge(code_verifier: str) -> str:
     return code_challenge
 
 
+def _oauth2_scope_set(scopes: str | None) -> frozenset[str]:
+    """Normalize a space-separated OAuth2 scope string for comparison."""
+    return frozenset((scopes or "").split())
+
+
+def _oauth2_scopes_match(requested: str | None, granted: str | None) -> bool:
+    """Return whether two OAuth2 scope strings contain the same scopes."""
+    return _oauth2_scope_set(requested) == _oauth2_scope_set(granted)
+
+
+def get_oauth2_scope_mismatch(
+    config: OAuth2ClientConfig,
+    granted_scope: str | None,
+) -> dict[str, Any] | None:
+    """Return scope mismatch details, or ``None`` when the policy is satisfied."""
+    policy = config.get(
+        "scope_matching_policy",
+        app.config["DATABASE_OAUTH2_SCOPE_MATCHING_POLICY"],
+    )
+    if policy not in {"ignore", "subset", "exact"}:
+        raise OAuth2Error(f"Invalid OAuth2 scope matching policy: {policy!r}")
+    if policy == "ignore":
+        return None
+
+    required = _oauth2_scope_set(config.get("scope"))
+    granted = _oauth2_scope_set(granted_scope)
+    missing = required - granted
+    unexpected = granted - required
+    if (policy == "subset" and not missing) or (
+        policy == "exact" and not missing and not unexpected
+    ):
+        return None
+
+    return {
+        "policy": policy,
+        "required_scopes": sorted(required),
+        "granted_scopes": sorted(granted),
+        "missing_scopes": sorted(missing),
+        "unexpected_scopes": sorted(unexpected),
+    }
+
+
+def raise_for_oauth2_scope_mismatch(
+    config: OAuth2ClientConfig,
+    granted_scope: str | None,
+) -> None:
+    """Raise a structured error when granted scopes violate the configured policy."""
+    if (mismatch := get_oauth2_scope_mismatch(config, granted_scope)):
+        raise OAuth2ScopeMismatchError(
+            policy=mismatch["policy"],
+            required_scopes=mismatch["required_scopes"],
+            granted_scopes=mismatch["granted_scopes"],
+            missing_scopes=mismatch["missing_scopes"],
+            unexpected_scopes=mismatch["unexpected_scopes"],
+        )
+
+
 @backoff.on_exception(
     backoff.expo,
     AcquireDistributedLockFailedException,
@@ -112,7 +174,18 @@ def get_oauth2_access_token(
     if token is None:
         return None
 
-    if token.access_token and datetime.now() < token.access_token_expiration:
+    try:
+        raise_for_oauth2_scope_mismatch(config, token.scope)
+    except OAuth2ScopeMismatchError:
+        db.session.delete(token)
+        db.session.flush()
+        raise
+
+    if (
+        token.access_token
+        and token.access_token_expiration
+        and datetime.now() < token.access_token_expiration
+    ):
         return token.access_token
 
     if token.refresh_token:
@@ -149,7 +222,11 @@ def refresh_oauth2_token(
         if token is None:
             return None
 
-        if token.access_token and datetime.now() < token.access_token_expiration:
+        if (
+            token.access_token
+            and token.access_token_expiration
+            and datetime.now() < token.access_token_expiration
+        ):
             return token.access_token
 
         if not token.refresh_token:
@@ -182,10 +259,19 @@ def refresh_oauth2_token(
             )
             raise
 
-        # store new access token; note that the refresh token might be revoked, in which
-        # case there would be no access token in the response
+        # Store new access token; note that the refresh token might be revoked, in
+        # which case there would be no access token in the response.
         if "access_token" not in token_response:
             return None
+
+        try:
+            raise_for_oauth2_scope_mismatch(
+                config, token_response.get("scope", token.scope)
+            )
+        except OAuth2ScopeMismatchError:
+            db.session.delete(token)
+            db.session.flush()
+            raise
 
         token.access_token = token_response["access_token"]
         token.access_token_expiration = datetime.now() + timedelta(
@@ -194,6 +280,8 @@ def refresh_oauth2_token(
         # Support single-use refresh tokens
         if new_refresh_token := token_response.get("refresh_token"):
             token.refresh_token = new_refresh_token
+        if new_scope := token_response.get("scope"):
+            token.scope = new_scope
 
         db.session.add(token)
 
@@ -294,6 +382,11 @@ class OAuth2ClientConfigSchema(Schema):
     id = fields.String(required=True)
     secret = fields.String(required=True)
     scope = fields.String(required=True)
+    scope_matching_policy = fields.String(
+        required=False,
+        load_default=lambda: app.config["DATABASE_OAUTH2_SCOPE_MATCHING_POLICY"],
+        validate=validate.OneOf(["ignore", "subset", "exact"]),
+    )
     redirect_uri = fields.String(
         required=False,
         load_default=get_oauth2_redirect_uri,
@@ -307,14 +400,36 @@ class OAuth2ClientConfigSchema(Schema):
     )
 
 
+def is_oauth2_required(database: Database, ex: Exception) -> bool:
+    """Return whether a database error requires user OAuth2 authorization."""
+    return database.is_oauth2_enabled() and database.db_engine_spec.needs_oauth2(ex)
+
+
+def handle_oauth2_error(
+    database: Database,
+    ex: Exception,
+    oauth_database: Database | None = None,
+    require_saved_database: bool = False,
+) -> bool:
+    """Start OAuth2 or defer it until the database has been persisted."""
+    if not database.db_engine_spec.needs_oauth2(ex):
+        return False
+
+    target_database = oauth_database or database
+    if not database.is_oauth2_enabled() and not require_saved_database:
+        return False
+    if require_saved_database and not target_database.id:
+        raise OAuth2RequiresSavedDBError() from ex
+
+    target_database.start_oauth2_dance()
+    return True
+
+
 @contextmanager
 def check_for_oauth2(database: Database) -> Iterator[None]:
-    """
-    Run code and check if OAuth2 is needed.
-    """
+    """Run code and start OAuth2 when the database requires authorization."""
     try:
         yield
     except Exception as ex:
-        if database.is_oauth2_enabled() and database.db_engine_spec.needs_oauth2(ex):
-            database.db_engine_spec.start_oauth2_dance(database)
+        handle_oauth2_error(database, ex, require_saved_database=True)
         raise

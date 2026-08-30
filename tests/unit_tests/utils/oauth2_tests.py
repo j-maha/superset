@@ -19,15 +19,28 @@
 
 import base64
 import hashlib
-from datetime import datetime
-from typing import cast
+import json
+from contextlib import contextmanager, nullcontext
+from datetime import datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
+from typing import Iterator, cast
+from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
 import pytest
 from freezegun import freeze_time
 from pytest_mock import MockerFixture
+from sqlalchemy.orm import Session
 
-from superset.superset_typing import OAuth2ClientConfig
+from superset.commands.database.oauth2 import OAuth2StoreTokenCommand
+from superset.databases.schemas import OAuth2ProviderResponseSchema
+from superset.db_engine_specs.base import BaseEngineSpec
+from superset.exceptions import OAuth2ScopeMismatchError
+from superset.superset_typing import OAuth2ClientConfig, OAuth2State, OAuth2TokenResponse
 from superset.utils.oauth2 import (
+    _oauth2_scopes_match,
+    get_oauth2_scope_mismatch,
     decode_oauth2_state,
     encode_oauth2_state,
     generate_code_challenge,
@@ -37,7 +50,161 @@ from superset.utils.oauth2 import (
     refresh_oauth2_token,
 )
 
+
+@contextmanager
+def local_oauth_provider(
+    code_verifier: str,
+) -> Iterator[tuple[str, list[dict[str, str]]]]:
+    """Run a local OAuth provider that validates authorization-code requests."""
+    requests_received: list[dict[str, str]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            content_length = int(self.headers["Content-Length"] or 0)
+            body = self.rfile.read(content_length).decode()
+            if self.headers.get_content_type() == "application/json":
+                request_data = json.loads(body)
+            else:
+                request_data = {
+                    key: values[0]
+                    for key, values in parse_qs(body, keep_blank_values=True).items()
+                }
+            requests_received.append(request_data)
+
+            if self.path != "/token":
+                self.send_error(404)
+                return
+
+            if request_data.get("grant_type") == "authorization_code":
+                if (
+                    request_data.get("code") != "authorization-code"
+                    or request_data.get("code_verifier") != code_verifier
+                ):
+                    self.send_error(400, "invalid authorization code request")
+                    return
+                response = {
+                    "access_token": "local-access-token",
+                    "expires_in": 3600,
+                    "refresh_token": "local-refresh-token",
+                    "scope": "scope-a",
+                }
+            elif request_data.get("grant_type") == "refresh_token":
+                if request_data.get("refresh_token") != "local-refresh-token":
+                    self.send_error(400, "invalid refresh token")
+                    return
+                response = {
+                    "access_token": "refreshed-access-token",
+                    "expires_in": 3600,
+                    "refresh_token": "local-refresh-token",
+                    "scope": "scope-a",
+                }
+            else:
+                self.send_error(400, "unsupported grant type")
+                return
+
+            response_body = json.dumps(response).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response_body)))
+            self.end_headers()
+            self.wfile.write(response_body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/token", requests_received
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+class LocalOAuth2ProviderEngineSpec(BaseEngineSpec):
+    """Engine spec used to exercise the real OAuth HTTP and persistence flow."""
+
+    engine = "local_oauth2_provider"
+
+
 DUMMY_OAUTH2_CONFIG = cast(OAuth2ClientConfig, {})
+
+
+@pytest.mark.parametrize(
+    ("requested", "granted", "matches"),
+    [
+        (None, None, True),
+        ("", None, True),
+        (None, "", True),
+        ("scope-a scope-b", "scope-b   scope-a", True),
+        ("scope-a scope-a", "scope-a", True),
+        ("scope-a", "scope-a scope-extra", False),
+        (
+            "https://www.googleapis.com/auth/bigquery.readonly",
+            "https://www.googleapis.com/auth/bigquery",
+            False,
+        ),
+        ("Scope-A", "scope-a", False),
+        (None, "scope-a", False),
+    ],
+)
+def test_oauth2_scopes_match_exactly(
+    requested: str | None, granted: str | None, matches: bool
+) -> None:
+    assert _oauth2_scopes_match(requested, granted) is matches
+
+
+@pytest.mark.parametrize(
+    ("policy", "granted", "matches"),
+    [
+        ("ignore", "scope-a scope-extra", True),
+        ("subset", "scope-a scope-extra", True),
+        ("subset", "scope-extra", False),
+        ("exact", "scope-a", True),
+        ("exact", "scope-a scope-extra", False),
+    ],
+)
+def test_oauth2_scope_matching_policy(
+    policy: str, granted: str, matches: bool
+) -> None:
+    config = cast(
+        OAuth2ClientConfig,
+        {
+            "scope": "scope-a",
+            "scope_matching_policy": policy,
+        },
+    )
+    mismatch = get_oauth2_scope_mismatch(config, granted)
+    assert (mismatch is None) is matches
+
+    if not matches:
+        assert mismatch == {
+            "policy": policy,
+            "required_scopes": ["scope-a"],
+            "granted_scopes": granted.split(),
+            "missing_scopes": [] if "scope-a" in granted.split() else ["scope-a"],
+            "unexpected_scopes": (
+                ["scope-extra"] if "scope-extra" in granted.split() else []
+            ),
+        }
+
+
+class LocalOAuth2EngineSpec(BaseEngineSpec):
+    @classmethod
+    def get_oauth2_fresh_token(
+        cls,
+        config: OAuth2ClientConfig,
+        refresh_token: str,
+    ) -> OAuth2TokenResponse:
+        assert config == DUMMY_OAUTH2_CONFIG
+        assert refresh_token == "old-refresh-token"  # noqa: S105
+        return {
+            "access_token": "new-access-token",
+            "expires_in": 3600,
+            "refresh_token": "new-refresh-token",
+        }
 
 
 def test_get_oauth2_access_token_base_no_token(mocker: MockerFixture) -> None:
@@ -91,6 +258,216 @@ def test_get_oauth2_access_token_base_refresh(mocker: MockerFixture) -> None:
     db.session.add.assert_called_with(token)
 
 
+@pytest.mark.parametrize(
+    "access_token_expiration",
+    [datetime(2024, 1, 1), None],
+    ids=["expired", "legacy-null-expiration"],
+)
+def test_get_oauth2_access_token_persists_refresh(
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    access_token_expiration: datetime | None,
+) -> None:
+    """Persist refreshed access and refresh tokens through the real ORM session."""
+    from flask_appbuilder.security.sqla.models import User
+
+    from superset.models.core import Database, DatabaseUserOAuth2Tokens
+
+    Database.metadata.create_all(session.get_bind())  # pylint: disable=no-member
+
+    user = User(
+        first_name="Refresh",
+        last_name="User",
+        email="oauth-refresh@example.org",
+        username="oauth-refresh",
+    )
+    database = Database(
+        database_name="oauth_refresh_db",
+        sqlalchemy_uri="sqlite://",
+    )
+    session.add_all([user, database])
+    session.flush()
+    session.add(
+        DatabaseUserOAuth2Tokens(
+            user_id=user.id,
+            database_id=database.id,
+            access_token="expired-access-token",  # noqa: S106
+            access_token_expiration=access_token_expiration,
+            refresh_token="old-refresh-token",  # noqa: S106
+        )
+    )
+    session.flush()
+
+    monkeypatch.setattr(
+        "superset.utils.oauth2.DistributedLock",
+        lambda **_: nullcontext(),
+    )
+
+    with freeze_time("2024-01-02"):
+        result = get_oauth2_access_token(
+            DUMMY_OAUTH2_CONFIG,
+            database.id,
+            user.id,
+            LocalOAuth2EngineSpec,
+        )
+
+    session.flush()
+    session.expire_all()
+    token = (
+        session.query(DatabaseUserOAuth2Tokens)
+        .filter_by(user_id=user.id, database_id=database.id)
+        .one()
+    )
+    assert result == "new-access-token"  # noqa: S105
+    assert token.access_token == "new-access-token"  # noqa: S105
+    assert token.access_token_expiration == datetime(2024, 1, 2, 1)
+    assert token.refresh_token == "new-refresh-token"  # noqa: S105
+
+
+def test_oauth2_callback_exchange_persists_and_refreshes_with_local_provider(
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise callback exchange, PKCE cleanup, persistence, and refresh locally."""
+    from flask_appbuilder.security.sqla.models import User
+
+    from superset.daos.key_value import KeyValueDAO
+    from superset.key_value.models import KeyValueEntry
+    from superset.key_value.types import JsonKeyValueCodec, KeyValueResource
+    from superset.models.core import Database, DatabaseUserOAuth2Tokens
+
+    Database.metadata.create_all(session.get_bind())  # pylint: disable=no-member
+    KeyValueEntry.metadata.create_all(session.get_bind())  # pylint: disable=no-member
+
+    user = User(
+        first_name="Local",
+        last_name="OAuth",
+        email="local-oauth@example.org",
+        username="local-oauth",
+    )
+    database = Database(
+        database_name="local_oauth_db",
+        sqlalchemy_uri="sqlite://",
+        encrypted_extra=json.dumps(
+            {
+                "oauth2_client_info": {
+                    "id": "client-id",
+                    "secret": "client-secret",
+                    "scope": "scope-a",
+                    "scope_matching_policy": "exact",
+                    "authorization_request_uri": "http://unused/authorize",
+                    "token_request_uri": "http://unused/token",
+                    "request_content_type": "data",
+                    "redirect_uri": "http://superset.test/oauth2/callback",
+                }
+            }
+        ),
+    )
+    session.add_all([user, database])
+    session.flush()
+
+    code_verifier = generate_code_verifier()
+    tab_id = uuid4()
+    state: OAuth2State = {
+        "database_id": database.id,
+        "user_id": user.id,
+        "default_redirect_uri": "http://superset.test/oauth2/callback",
+        "tab_id": str(tab_id),
+    }
+
+    with local_oauth_provider(code_verifier) as (token_uri, requests_received):
+        database.encrypted_extra = json.dumps(
+            {
+                "oauth2_client_info": {
+                    "id": "client-id",
+                    "secret": "client-secret",
+                    "scope": "scope-a",
+                    "scope_matching_policy": "exact",
+                    "authorization_request_uri": "http://unused/authorize",
+                    "token_request_uri": token_uri,
+                    "request_content_type": "data",
+                    "redirect_uri": "http://superset.test/oauth2/callback",
+                }
+            }
+        )
+        session.flush()
+        config = database.get_oauth2_config()
+        assert config is not None
+
+        authorization_uri = LocalOAuth2ProviderEngineSpec.get_oauth2_authorization_uri(
+            config,
+            state,
+            code_verifier=code_verifier,
+        )
+        authorization_query = parse_qs(urlparse(authorization_uri).query)
+        assert authorization_query["code_challenge_method"] == ["S256"]
+        assert authorization_query["code_challenge"] == [
+            generate_code_challenge(code_verifier)
+        ]
+
+        KeyValueDAO.create_entry(
+            resource=KeyValueResource.PKCE_CODE_VERIFIER,
+            key=tab_id,
+            value={"code_verifier": code_verifier},
+            codec=JsonKeyValueCodec(),
+        )
+        session.flush()
+        monkeypatch.setattr(
+            "superset.utils.oauth2.DistributedLock",
+            lambda **_: nullcontext(),
+        )
+
+        callback_parameters = cast(
+            OAuth2ProviderResponseSchema,
+            {
+                "code": "authorization-code",
+                "state": encode_oauth2_state(state),
+            },
+        )
+        result = OAuth2StoreTokenCommand(callback_parameters).run()
+
+        assert result.access_token == "local-access-token"  # noqa: S105
+        assert result.refresh_token == "local-refresh-token"  # noqa: S105
+        assert result.scope == "scope-a"
+        assert (
+            KeyValueDAO.get_value(
+                KeyValueResource.PKCE_CODE_VERIFIER,
+                tab_id,
+                JsonKeyValueCodec(),
+            )
+            is None
+        )
+        assert requests_received == [
+            {
+                "code": "authorization-code",
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "redirect_uri": "http://superset.test/oauth2/callback",
+                "grant_type": "authorization_code",
+                "code_verifier": code_verifier,
+            }
+        ]
+
+        stored_token = (
+            session.query(DatabaseUserOAuth2Tokens)
+            .filter_by(user_id=user.id, database_id=database.id)
+            .one()
+        )
+        stored_token.access_token_expiration = datetime(2020, 1, 1)
+        session.flush()
+
+        assert (
+            get_oauth2_access_token(config, database.id, user.id, LocalOAuth2ProviderEngineSpec)
+            == "refreshed-access-token"
+        )
+        assert requests_received[-1] == {
+            "client_id": "client-id",
+            "client_secret": "client-secret",
+            "refresh_token": "local-refresh-token",
+            "grant_type": "refresh_token",
+        }
+
+
 def test_get_oauth2_access_token_base_no_refresh(mocker: MockerFixture) -> None:
     """
     Test `get_oauth2_access_token` when token is expired and there's no refresh.
@@ -108,6 +485,60 @@ def test_get_oauth2_access_token_base_no_refresh(mocker: MockerFixture) -> None:
 
     # check that token was deleted
     db.session.delete.assert_called_with(token)
+
+
+def test_get_oauth2_access_token_preserves_token_with_stale_scope(
+    mocker: MockerFixture,
+) -> None:
+    db = mocker.patch("superset.utils.oauth2.db")
+    db_engine_spec = mocker.MagicMock()
+    token = mocker.MagicMock()
+    token.scope = "openid https://www.googleapis.com/auth/bigquery"
+    db.session.query().filter_by().one_or_none.return_value = token
+
+    with pytest.raises(OAuth2ScopeMismatchError) as exc_info:
+        get_oauth2_access_token(
+            {
+                "scope": "openid https://www.googleapis.com/auth/bigquery.readonly",
+                "scope_matching_policy": "exact",
+            },
+            1,
+            1,
+            db_engine_spec,
+        )
+
+    assert "scope matching policy" in str(exc_info.value)
+    db.session.delete.assert_called_once_with(token)
+    db.session.flush.assert_called_once_with()
+
+
+def test_refresh_oauth2_token_deletes_token_on_scope_mismatch(
+    mocker: MockerFixture,
+) -> None:
+    db = mocker.patch("superset.utils.oauth2.db")
+    mocker.patch("superset.utils.oauth2.DistributedLock")
+    db_engine_spec = mocker.MagicMock()
+    db_engine_spec.get_oauth2_fresh_token.return_value = {
+        "access_token": "new-access-token",
+        "expires_in": 3600,
+        "scope": "scope-b",
+    }
+    token = mocker.MagicMock()
+    token.access_token = None
+    token.refresh_token = "refresh-token"  # noqa: S105
+    token.scope = "scope-a"
+    db.session.query().filter_by().one_or_none.return_value = token
+
+    config = cast(
+        OAuth2ClientConfig,
+        {"scope": "scope-a", "scope_matching_policy": "exact"},
+    )
+    with pytest.raises(OAuth2ScopeMismatchError):
+        refresh_oauth2_token(config, 1, 1, db_engine_spec)
+
+    db.session.delete.assert_called_once_with(token)
+    db.session.flush.assert_called_once_with()
+    db.session.add.assert_not_called()
 
 
 def test_refresh_oauth2_token_deletes_token_on_oauth2_exception(

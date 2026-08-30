@@ -26,6 +26,7 @@ import {
   DatasetNotFoundErrorMessage,
   InvalidSQLErrorMessage,
   OAuth2RedirectMessage,
+  OAuth2ScopeMismatchMessage,
   FrontendNetworkErrorMessage,
 } from 'src/components';
 
@@ -161,6 +162,10 @@ export default function setupErrorMessages() {
   errorMessageComponentRegistry.registerValue(
     ErrorTypeEnum.OAUTH2_REDIRECT,
     OAuth2RedirectMessage,
+  );
+  errorMessageComponentRegistry.registerValue(
+    ErrorTypeEnum.OAUTH2_SCOPE_MISMATCH,
+    OAuth2ScopeMismatchMessage,
   );
   errorMessageComponentRegistry.registerValue(
     ErrorTypeEnum.INVALID_SQL_ERROR,

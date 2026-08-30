@@ -159,6 +159,7 @@ class UpdateReportScheduleCommand(UpdateMixin, BaseReportScheduleCommand):
 
         # Validate chart or dashboard relations
         self.validate_chart_dashboard(exceptions, update=True)
+        self._validate_no_impersonated_databases(exceptions)
         self._validate_report_extra(exceptions)
 
         if "validator_config_json" in self._properties:

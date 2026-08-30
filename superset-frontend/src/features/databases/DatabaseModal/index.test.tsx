@@ -62,6 +62,7 @@ const dbProps = {
 const DATABASE_FETCH_ENDPOINT = 'glob:*/api/v1/database/10';
 const AVAILABLE_DB_ENDPOINT = 'glob:*/api/v1/database/available*';
 const VALIDATE_PARAMS_ENDPOINT = 'glob:*/api/v1/database/validate_parameters*';
+const TEST_CONNECTION_ENDPOINT = 'glob:*/api/v1/database/test_connection/';
 const DATABASE_CONNECT_ENDPOINT = 'glob:*/api/v1/database/';
 const IMPORT_DB_ENDPOINT = 'glob:*/api/v1/database/import/';
 
@@ -323,6 +324,7 @@ describe('DatabaseModal', () => {
       },
       { name: 'validate-params' },
     );
+    fetchMock.post(TEST_CONNECTION_ENDPOINT, { message: 'OK' });
   });
 
   beforeEach(() => {
@@ -1481,6 +1483,52 @@ describe('DatabaseModal', () => {
             fetchMock.callHistory.calls(VALIDATE_PARAMS_ENDPOINT).length,
           ).toBeGreaterThan(0);
         });
+      });
+
+      test('uses the newly created database ID when opening SQL Lab', async () => {
+        const fetchResource = jest.fn().mockResolvedValue({ id: 15 });
+        const createResource = jest.fn().mockResolvedValue(15);
+        const useSingleViewResourceMock = jest
+          .spyOn(hooks, 'useSingleViewResource')
+          .mockReturnValue({
+            state: {
+              loading: false,
+              resource: null,
+              error: null,
+            },
+            fetchResource,
+            createResource,
+            updateResource: jest.fn(),
+            clearError: jest.fn(),
+            setResource: jest.fn(),
+          });
+
+        setup({ dbEngine: 'PostgreSQL' });
+        expect(await screen.findByText(/step 2 of 3/i)).toBeInTheDocument();
+
+        const textboxes = await screen.findAllByRole('textbox');
+        const values = ['localhost', 'testdb', 'testusername', 'testpass'];
+        values.forEach((value, index) =>
+          userEvent.type(textboxes[index], value),
+        );
+        fireEvent.change(screen.getByRole('spinbutton'), {
+          target: { value: '5432' },
+        });
+        userEvent.click(document.body);
+        await waitFor(() =>
+          expect(screen.getByTestId('btn-submit-connection')).toBeEnabled(),
+        );
+
+        userEvent.click(screen.getByTestId('btn-submit-connection'));
+        const queryButton = await screen.findByRole('button', {
+          name: /query data in sql lab/i,
+        });
+        userEvent.click(queryButton);
+
+        await waitFor(() => expect(fetchResource).toHaveBeenCalledWith(15));
+        expect(fetchResource).not.toHaveBeenCalledWith(14);
+        expect(mockHistoryPush).toHaveBeenCalledWith('/sqllab?db=true');
+        useSingleViewResourceMock.mockRestore();
       });
 
       test('does not fire redundant validation on blur when db has not changed', async () => {

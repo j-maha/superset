@@ -164,20 +164,14 @@ class TestBigQueryDbEngineSpec(SupersetTestCase):
         }
 
     @mock.patch("superset.db_engine_specs.bigquery.BigQueryEngineSpec.get_engine")
+    @mock.patch("superset.db_engine_specs.bigquery.BigQueryEngineSpec._get_client")
     @mock.patch("superset.db_engine_specs.bigquery.pandas_gbq")
-    @mock.patch("superset.db_engine_specs.bigquery.service_account")
-    def test_df_to_sql(self, mock_service_account, mock_pandas_gbq, mock_get_engine):
+    def test_df_to_sql(self, mock_pandas_gbq, mock_get_client, mock_get_engine):
         """
         DB Eng Specs (bigquery): Test DataFrame to SQL contract
         """
-        mock_service_account.Credentials.from_service_account_info = mock.MagicMock(
-            return_value="account_info"
-        )
-
+        mock_get_client.return_value.__enter__.return_value = "bigquery-client"
         mock_get_engine.return_value.__enter__.return_value.url.host = "google-host"
-        mock_get_engine.return_value.__enter__.return_value.dialect.credentials_info = (
-            "secrets"
-        )
 
         df = DataFrame()
         database = mock.MagicMock()
@@ -192,7 +186,7 @@ class TestBigQueryDbEngineSpec(SupersetTestCase):
             df,
             project_id="google-host",
             destination_table="schema.name",
-            credentials="account_info",
+            bigquery_client="bigquery-client",
             if_exists="extra_key",
         )
 

@@ -17,7 +17,7 @@
  * under the License.
  */
 import { t } from '@apache-superset/core/translation';
-import { getExtensionsRegistry } from '@superset-ui/core';
+import { ErrorTypeEnum, getExtensionsRegistry } from '@superset-ui/core';
 import { Alert } from '@apache-superset/core/components';
 import { styled, SupersetTheme } from '@apache-superset/core/theme';
 
@@ -685,6 +685,7 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
   const lastValidatedDbSnapshotRef = useRef<string | null>(null);
   const [hasConnectedDb, setHasConnectedDb] = useState<boolean>(false);
   const [showCTAbtns, setShowCTAbtns] = useState(false);
+  const createdDatabaseId = useRef<number | null>(null);
   const [dbName, setDbName] = useState('');
   const [editNewDb, setEditNewDb] = useState<boolean>(false);
   const [isLoading, setLoading] = useState<boolean>(false);
@@ -823,12 +824,16 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
       (errorMsg: string) => {
         setTestInProgress(false);
         addDangerToast(errorMsg);
-        setHasValidated(false);
       },
       (errorMsg: string) => {
         setTestInProgress(false);
         addSuccessToast(errorMsg);
         setHasValidated(true);
+      },
+      errorType => {
+        setHasValidated(
+          errorType === ErrorTypeEnum.OAUTH2_REQUIRES_SAVED_DATABASE,
+        );
       },
     );
   };
@@ -906,6 +911,7 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
   const onClose = () => {
     setDB({ type: ActionType.Reset });
     setHasConnectedDb(false);
+    createdDatabaseId.current = null;
     handleClearValidationErrors(); // reset validation errors on close
     clearError();
     setEditNewDb(false);
@@ -1102,6 +1108,7 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
         dbToUpdate.configuration_method === ConfigurationMethod.DynamicForm, // onShow toast on SQLA Forms
       );
       if (dbId) {
+        createdDatabaseId.current = dbId;
         setHasConnectedDb(true);
         if (onDatabaseAdd) onDatabaseAdd();
         dbConfigExtraExtension
@@ -1323,8 +1330,9 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
   );
 
   const handleBackButtonOnFinish = () => {
-    if (dbFetched) {
-      fetchResource(dbFetched.id as number);
+    const databaseId = createdDatabaseId.current ?? dbFetched?.id;
+    if (databaseId) {
+      fetchResource(databaseId);
     }
     setShowCTAbtns(false);
     setEditNewDb(true);
@@ -1882,7 +1890,8 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
 
   const fetchAndSetDB = () => {
     setLoading(true);
-    fetchResource(dbFetched?.id as number).then(r => {
+    const databaseId = createdDatabaseId.current ?? dbFetched?.id;
+    fetchResource(databaseId as number).then(r => {
       setItem(LocalStorageKeys.Database, r);
     });
   };

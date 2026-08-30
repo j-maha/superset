@@ -33,6 +33,7 @@ from superset.commands.base import BaseCommand
 from superset.commands.dashboard.permalink.create import CreateDashboardPermalinkCommand
 from superset.commands.exceptions import CommandException, UpdateFailedError
 from superset.commands.report.alert import AlertCommand
+from superset.commands.report.base import validate_no_impersonated_databases
 from superset.commands.report.exceptions import (
     ReportScheduleAlertGracePeriodError,
     ReportScheduleClientErrorsException,
@@ -42,6 +43,7 @@ from superset.commands.report.exceptions import (
     ReportScheduleDataFrameTimeout,
     ReportScheduleExecuteUnexpectedError,
     ReportScheduleExecutorNotFoundError,
+    ReportScheduleInvalidError,
     ReportScheduleNotFoundError,
     ReportSchedulePreviousWorkingError,
     ReportScheduleScreenshotFailedError,
@@ -1539,3 +1541,6 @@ class AsyncExecuteReportScheduleCommand(BaseCommand):
         )
         if not self._model:
             raise ReportScheduleNotFoundError()
+
+        if (policy_exceptions := validate_no_impersonated_databases({}, self._model)):
+            raise ReportScheduleInvalidError(exceptions=policy_exceptions)

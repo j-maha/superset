@@ -25,7 +25,7 @@ from superset.commands.database.exceptions import DatabaseNotFoundError
 from superset.commands.database.oauth2 import OAuth2StoreTokenCommand
 from superset.daos.database import DatabaseUserOAuth2TokensDAO
 from superset.databases.schemas import OAuth2ProviderResponseSchema
-from superset.exceptions import OAuth2Error
+from superset.exceptions import OAuth2Error, OAuth2ScopeMismatchError
 from superset.models.core import Database
 from superset.utils.oauth2 import decode_oauth2_state, encode_oauth2_state
 
@@ -36,11 +36,13 @@ def mock_database(mocker: MockerFixture) -> MagicMock:
     database.get_oauth2_config.return_value = {
         "client_id": "test",
         "client_secret": "secret",
+        "scope": "test-scope",
     }
     database.db_engine_spec.get_oauth2_token.return_value = {
         "access_token": "test_access_token",
         "expires_in": 3600,
         "refresh_token": "test_refresh_token",
+        "scope": "test-scope",
     }
     return database
 
@@ -133,6 +135,77 @@ def test_run_success(
 
     assert result == "new_token"
     mock_create.assert_called_once()
+    assert mock_create.call_args.kwargs["attributes"]["scope"] == "test-scope"
+
+
+def test_run_prefers_provider_scope(
+    mocker: MockerFixture,
+    mock_database: MagicMock,
+    mock_state: str,
+    mock_parameters: OAuth2ProviderResponseSchema,
+) -> None:
+    mock_database.db_engine_spec.get_oauth2_token.return_value["scope"] = (
+        "provider-scope"
+    )
+    mock_parameters["scope"] = "callback-scope"
+    mocker.patch.object(
+        DatabaseUserOAuth2TokensDAO, "get_database", return_value=mock_database
+    )
+    mocker.patch.object(
+        DatabaseUserOAuth2TokensDAO, "find_one_or_none", return_value=None
+    )
+    mock_create = mocker.patch.object(
+        DatabaseUserOAuth2TokensDAO, "create", return_value="new_token"
+    )
+    mocker.patch("superset.utils.oauth2.decode_oauth2_state", return_value=mock_state)
+
+    OAuth2StoreTokenCommand(mock_parameters).run()
+
+    assert mock_create.call_args.kwargs["attributes"]["scope"] == "provider-scope"
+
+
+def test_run_rejects_callback_scope_without_provider_scope(
+    mocker: MockerFixture,
+    mock_database: MagicMock,
+    mock_state: str,
+    mock_parameters: OAuth2ProviderResponseSchema,
+) -> None:
+    mock_database.db_engine_spec.get_oauth2_token.return_value["scope"] = None
+    mock_database.get_oauth2_config.return_value["scope_matching_policy"] = "subset"
+    mock_parameters["scope"] = "callback-scope"
+    mocker.patch.object(
+        DatabaseUserOAuth2TokensDAO, "get_database", return_value=mock_database
+    )
+    mocker.patch("superset.utils.oauth2.decode_oauth2_state", return_value=mock_state)
+
+    with pytest.raises(OAuth2ScopeMismatchError):
+        OAuth2StoreTokenCommand(mock_parameters).run()
+
+
+def test_run_rejects_missing_scope_without_deleting_existing_token(
+    mocker: MockerFixture,
+    mock_database: MagicMock,
+    mock_state: str,
+    mock_parameters: OAuth2ProviderResponseSchema,
+) -> None:
+    mock_database.db_engine_spec.get_oauth2_token.return_value["scope"] = None
+    mock_database.get_oauth2_config.return_value["scope_matching_policy"] = "subset"
+    existing_token = MagicMock()
+    mocker.patch.object(
+        DatabaseUserOAuth2TokensDAO, "get_database", return_value=mock_database
+    )
+    mocker.patch.object(
+        DatabaseUserOAuth2TokensDAO,
+        "find_one_or_none",
+        return_value=existing_token,
+    )
+    mock_delete = mocker.patch.object(DatabaseUserOAuth2TokensDAO, "delete")
+    mocker.patch("superset.utils.oauth2.decode_oauth2_state", return_value=mock_state)
+
+    with pytest.raises(OAuth2ScopeMismatchError):
+        OAuth2StoreTokenCommand(mock_parameters).run()
+
+    mock_delete.assert_not_called()
 
 
 def test_run_existing_token(

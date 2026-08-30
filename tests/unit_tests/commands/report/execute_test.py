@@ -17,6 +17,7 @@
 
 import json  # noqa: TID251
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 from urllib.error import URLError
@@ -33,6 +34,8 @@ from superset.commands.report.exceptions import (
     ReportScheduleCsvFailedError,
     ReportScheduleExecuteUnexpectedError,
     ReportScheduleExecutorNotFoundError,
+    ReportScheduleImpersonatedDatabaseValidationError,
+    ReportScheduleInvalidError,
     ReportSchedulePreviousWorkingError,
     ReportScheduleScreenshotFailedError,
     ReportScheduleScreenshotTimeout,
@@ -1744,6 +1747,51 @@ def test_resolve_executor_user_returns_user_and_username(
     assert username == "real_user"
 
 
+def test_async_report_executes_state_machine_as_executor(
+    app: SupersetApp,
+    mocker: MockerFixture,
+) -> None:
+    """Scheduled reports run their state machine as the configured executor."""
+    from flask import g
+
+    from superset.commands.report.execute import AsyncExecuteReportScheduleCommand
+    from superset.utils.core import get_username
+
+    user = mocker.MagicMock(username="report_executor")
+    model = mocker.MagicMock()
+    model.dashboard_id = None
+    command = AsyncExecuteReportScheduleCommand(
+        "084e7ee6-5557-4ecd-9632-b7f39c9ec524",
+        model_id=1,
+        scheduled_dttm=datetime.now(),
+    )
+    mocker.patch.object(
+        command, "validate", side_effect=lambda: setattr(command, "_model", model)
+    )
+    mocker.patch(
+        "superset.commands.report.execute.get_executor",
+        return_value=(None, user.username),
+    )
+    mocker.patch(
+        "superset.commands.report.execute.security_manager.find_user",
+        return_value=user,
+    )
+    state_machine = mocker.patch(
+        "superset.commands.report.execute.ReportScheduleStateMachine"
+    )
+
+    def assert_executor_context() -> None:
+        assert g.user is user
+        assert get_username() == user.username
+
+    state_machine.return_value.run.side_effect = assert_executor_context
+
+    command.run()
+
+    state_machine.return_value.run.assert_called_once_with()
+    assert getattr(g, "user", None) is not user
+
+
 def test_update_recipient_to_slack_v2(mocker: MockerFixture):
     """
     Test converting a Slack recipient to Slack v2 format.
@@ -2702,3 +2750,32 @@ def test_get_url_raises_unexpected_error_when_target_is_missing(
     assert "orphan_report" in message
     assert "chart_id=None" in message
     assert "dashboard_id=None" in message
+
+
+
+def test_async_report_rejects_persisted_impersonated_database(
+    app: SupersetApp, mocker: MockerFixture
+) -> None:
+    """Background execution rejects schedules using user impersonation."""
+    from superset import db
+    from superset.commands.report.execute import AsyncExecuteReportScheduleCommand
+
+    model = MagicMock(
+        database=SimpleNamespace(impersonate_user=True), chart=None, dashboard=None
+    )
+    query = mocker.MagicMock()
+    query.filter_by.return_value.one_or_none.return_value = model
+    mocker.patch.object(db.session, "query", return_value=query)
+    command = AsyncExecuteReportScheduleCommand(
+        "084e7ee6-5557-4ecd-9632-b7f39c9ec524",
+        model_id=1,
+        scheduled_dttm=datetime.now(),
+    )
+
+    with pytest.raises(ReportScheduleInvalidError) as exc_info:
+        command.validate()
+
+    assert isinstance(
+        exc_info.value._exceptions[0],
+        ReportScheduleImpersonatedDatabaseValidationError,
+    )
