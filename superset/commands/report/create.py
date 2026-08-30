@@ -145,6 +145,7 @@ class CreateReportScheduleCommand(CreateMixin, BaseReportScheduleCommand):
 
         # Validate chart or dashboard relations
         self.validate_chart_dashboard(exceptions)
+        self._validate_no_impersonated_databases(exceptions)
         self._validate_report_extra(exceptions)
 
         # Validate that each chart or dashboard only has one report with

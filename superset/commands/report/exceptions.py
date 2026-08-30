@@ -52,6 +52,19 @@ class ReportScheduleDatabaseNotAllowedValidationError(ValidationError):
         )
 
 
+class ReportScheduleImpersonatedDatabaseValidationError(ValidationError):
+    """Validation error for background schedules using user impersonation."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            _(
+                "Background reports and alerts cannot use databases with user "
+                "impersonation enabled."
+            ),
+            field_name="database",
+        )
+
+
 class DashboardNotFoundValidationError(ValidationError):
     """
     Marshmallow validation error for dashboard does not exist

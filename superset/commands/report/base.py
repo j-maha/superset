@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import logging
+from collections.abc import Iterable
 from typing import Any, Optional
 
 from croniter import croniter
@@ -32,6 +33,7 @@ from superset.commands.report.exceptions import (
     ReportScheduleEitherChartOrDashboardError,
     ReportScheduleForbiddenError,
     ReportScheduleFrequencyNotAllowed,
+    ReportScheduleImpersonatedDatabaseValidationError,
     ReportScheduleOnlyChartOrDashboardError,
 )
 from superset.daos.base import BaseDAO
@@ -46,6 +48,50 @@ from superset.reports.types import ReportScheduleExtra
 from superset.utils import json
 
 logger = logging.getLogger(__name__)
+
+
+def validate_no_impersonated_databases(
+    properties: dict[str, Any], model: Any = None
+) -> list[ValidationError]:
+    """Return validation errors for schedules using user impersonation."""
+    databases: list[Any] = []
+
+    database = (
+        properties["database"]
+        if "database" in properties
+        else getattr(model, "database", None)
+    )
+    if database is not None:
+        databases.append(database)
+
+    chart = (
+        properties["chart"]
+        if "chart" in properties
+        else getattr(model, "chart", None)
+    )
+    datasource = getattr(chart, "datasource", None)
+    database = getattr(datasource, "database", None)
+    if database is not None:
+        databases.append(database)
+
+    dashboard = (
+        properties["dashboard"]
+        if "dashboard" in properties
+        else getattr(model, "dashboard", None)
+    )
+    datasources = getattr(dashboard, "datasources", None)
+    if isinstance(datasources, Iterable):
+        for datasource in datasources:
+            database = getattr(datasource, "database", None)
+            if database is not None:
+                databases.append(database)
+
+    if any(
+        getattr(database, "impersonate_user", False) is True
+        for database in databases
+    ):
+        return [ReportScheduleImpersonatedDatabaseValidationError()]
+    return []
 
 
 class BaseReportScheduleCommand(BaseCommand):
@@ -76,6 +122,16 @@ class BaseReportScheduleCommand(BaseCommand):
             except SupersetSecurityException as ex:
                 raise ReportScheduleForbiddenError() from ex
         self._properties[kind] = obj
+
+    def _validate_no_impersonated_databases(
+        self, exceptions: list[ValidationError]
+    ) -> None:
+        """Reject background schedules that would need a user OAuth session."""
+        exceptions.extend(
+            validate_no_impersonated_databases(
+                self._properties, getattr(self, "_model", None)
+            )
+        )
 
     def validate_chart_dashboard(
         self, exceptions: list[ValidationError], update: bool = False

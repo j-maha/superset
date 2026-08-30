@@ -172,11 +172,18 @@ export function OAuth2RedirectMessage({
   }
 
   const body = (
-    <p>
-      {t(
-        'This database uses OAuth2 for authentication. Please click the link above to grant Apache Superset permission to access the data. Your personal access token will be stored encrypted and used only for queries run by you.',
-      )}
-    </p>
+    <>
+      <p>
+        {t(
+          'This database uses OAuth2 for authentication. Please click the link above to grant Apache Superset permission to access the data. Your personal access token will be stored encrypted and used only for queries run by you.',
+        )}
+      </p>
+      <p>
+        {t(
+          'If the authorization window does not open, allow pop-ups for this site and click the authorization link again. After authorizing, return to this tab and retry if the operation does not resume automatically.',
+        )}
+      </p>
+    </>
   );
   const subtitle = (
     <>

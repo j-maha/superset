@@ -17,6 +17,7 @@
 
 import json  # noqa: TID251
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 from urllib.error import URLError
@@ -33,6 +34,8 @@ from superset.commands.report.exceptions import (
     ReportScheduleCsvFailedError,
     ReportScheduleExecuteUnexpectedError,
     ReportScheduleExecutorNotFoundError,
+    ReportScheduleImpersonatedDatabaseValidationError,
+    ReportScheduleInvalidError,
     ReportSchedulePreviousWorkingError,
     ReportScheduleScreenshotFailedError,
     ReportScheduleScreenshotTimeout,
@@ -2747,3 +2750,32 @@ def test_get_url_raises_unexpected_error_when_target_is_missing(
     assert "orphan_report" in message
     assert "chart_id=None" in message
     assert "dashboard_id=None" in message
+
+
+
+def test_async_report_rejects_persisted_impersonated_database(
+    app: SupersetApp, mocker: MockerFixture
+) -> None:
+    """Background execution rejects schedules using user impersonation."""
+    from superset import db
+    from superset.commands.report.execute import AsyncExecuteReportScheduleCommand
+
+    model = MagicMock(
+        database=SimpleNamespace(impersonate_user=True), chart=None, dashboard=None
+    )
+    query = mocker.MagicMock()
+    query.filter_by.return_value.one_or_none.return_value = model
+    mocker.patch.object(db.session, "query", return_value=query)
+    command = AsyncExecuteReportScheduleCommand(
+        "084e7ee6-5557-4ecd-9632-b7f39c9ec524",
+        model_id=1,
+        scheduled_dttm=datetime.now(),
+    )
+
+    with pytest.raises(ReportScheduleInvalidError) as exc_info:
+        command.validate()
+
+    assert isinstance(
+        exc_info.value._exceptions[0],
+        ReportScheduleImpersonatedDatabaseValidationError,
+    )

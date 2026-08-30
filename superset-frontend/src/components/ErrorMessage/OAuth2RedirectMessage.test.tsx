@@ -147,6 +147,15 @@ describe('OAuth2RedirectMessage Component', () => {
     expect(getByText(/provide authorization/i)).toBeInTheDocument();
   });
 
+  test('explains how to recover when the authorization popup is blocked', () => {
+    const { getByText } = render(setup());
+
+    expect(getByText(/allow pop-ups for this site/i)).toBeInTheDocument();
+    expect(
+      getByText(/retry if the operation does not resume automatically/i),
+    ).toBeInTheDocument();
+  });
+
   test('renders the authorization link pointing at the OAuth2 URL', () => {
     const { getByText } = render(setup());
 
