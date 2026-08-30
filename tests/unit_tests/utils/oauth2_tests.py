@@ -33,9 +33,11 @@ from freezegun import freeze_time
 from pytest_mock import MockerFixture
 from sqlalchemy.orm import Session
 
+from superset.commands.database.oauth2 import OAuth2StoreTokenCommand
+from superset.databases.schemas import OAuth2ProviderResponseSchema
 from superset.db_engine_specs.base import BaseEngineSpec
 from superset.exceptions import OAuth2ScopeMismatchError
-from superset.superset_typing import OAuth2ClientConfig, OAuth2TokenResponse
+from superset.superset_typing import OAuth2ClientConfig, OAuth2State, OAuth2TokenResponse
 from superset.utils.oauth2 import (
     _oauth2_scopes_match,
     get_oauth2_scope_mismatch,
@@ -329,7 +331,6 @@ def test_oauth2_callback_exchange_persists_and_refreshes_with_local_provider(
     """Exercise callback exchange, PKCE cleanup, persistence, and refresh locally."""
     from flask_appbuilder.security.sqla.models import User
 
-    from superset.commands.database.oauth2 import OAuth2StoreTokenCommand
     from superset.daos.key_value import KeyValueDAO
     from superset.key_value.models import KeyValueEntry
     from superset.key_value.types import JsonKeyValueCodec, KeyValueResource
@@ -367,7 +368,7 @@ def test_oauth2_callback_exchange_persists_and_refreshes_with_local_provider(
 
     code_verifier = generate_code_verifier()
     tab_id = uuid4()
-    state = {
+    state: OAuth2State = {
         "database_id": database.id,
         "user_id": user.id,
         "default_redirect_uri": "http://superset.test/oauth2/callback",
@@ -416,12 +417,14 @@ def test_oauth2_callback_exchange_persists_and_refreshes_with_local_provider(
             lambda **_: nullcontext(),
         )
 
-        result = OAuth2StoreTokenCommand(
+        callback_parameters = cast(
+            OAuth2ProviderResponseSchema,
             {
                 "code": "authorization-code",
                 "state": encode_oauth2_state(state),
-            }
-        ).run()
+            },
+        )
+        result = OAuth2StoreTokenCommand(callback_parameters).run()
 
         assert result.access_token == "local-access-token"  # noqa: S105
         assert result.refresh_token == "local-refresh-token"  # noqa: S105
