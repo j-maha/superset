@@ -46,6 +46,7 @@ from superset.models.core import Database
 from superset.models.helpers import skip_visibility_filter
 from superset.models.slice import Slice
 from superset.utils.decorators import on_error, transaction
+from superset.utils.oauth2 import is_oauth2_required
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +110,7 @@ class SyncPermissionsCommand(BaseCommand):
             try:
                 alive = ping(engine)
             except Exception as err:
-                if (
-                    self.db_connection.is_oauth2_enabled()
-                    and self.db_connection.db_engine_spec.needs_oauth2(err)
-                ):
+                if is_oauth2_required(self.db_connection, err):
                     raise MissingOAuth2TokenError() from err
                 raise DatabaseConnectionFailedError() from err
 

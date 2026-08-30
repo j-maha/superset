@@ -83,6 +83,7 @@ from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
 from superset.exceptions import (
     ColumnNotFoundException,
     DatasetInvalidPermissionEvaluationException,
+    OAuth2RedirectError,
     QueryObjectValidationError,
     SupersetGenericDBErrorException,
     SupersetParseError,
@@ -1593,11 +1594,14 @@ class SqlaTable(
     def select_star(self) -> str | None:
         # show_cols and latest_partition set to false to avoid
         # the expensive cost of inspecting the DB
-        return self.database.select_star(
-            Table(self.table_name, self.schema or None, self.catalog),
-            show_cols=False,
-            latest_partition=False,
-        )
+        try:
+            return self.database.select_star(
+                Table(self.table_name, self.schema or None, self.catalog),
+                show_cols=False,
+                latest_partition=False,
+            )
+        except OAuth2RedirectError:
+            return None
 
     @property
     def health_check_message(self) -> str | None:
@@ -1610,7 +1614,10 @@ class SqlaTable(
 
     @property
     def time_grain_sqla(self) -> list[tuple[Any, Any]]:
-        return [(g.duration, g.name) for g in self.database.grains() or []]
+        try:
+            return [(g.duration, g.name) for g in self.database.grains() or []]
+        except OAuth2RedirectError:
+            return []
 
     @property
     def data(self) -> ExplorableData:
