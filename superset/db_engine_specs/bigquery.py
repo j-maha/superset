@@ -21,6 +21,8 @@ import logging
 import re
 import sys
 import urllib
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from datetime import datetime
 from re import Pattern
 from typing import Any, Callable, TYPE_CHECKING, TypedDict
@@ -33,6 +35,7 @@ from flask_babel import gettext as __
 from marshmallow import fields, Schema
 from marshmallow.exceptions import ValidationError
 from sqlalchemy import column, func, types
+from sqlalchemy.dialects import registry
 from sqlalchemy.engine.base import Engine
 from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.engine.reflection import Inspector
@@ -48,9 +51,12 @@ from superset.db_engine_specs.base import (
     BasicPropertiesType,
     DatabaseCategory,
 )
-from superset.db_engine_specs.exceptions import SupersetDBAPIConnectionError
+from superset.db_engine_specs.exceptions import (
+    BigQueryOAuth2TokenRequiredError,
+    SupersetDBAPIConnectionError,
+)
 from superset.errors import SupersetError, SupersetErrorType
-from superset.exceptions import SupersetException
+from superset.exceptions import OAuth2RedirectError, SupersetException
 from superset.sql.parse import SQLScript, Table
 from superset.superset_typing import ResultSetColumnType
 from superset.utils import core as utils, json
@@ -62,9 +68,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 try:
-    import google.auth
+    from google.auth.exceptions import GoogleAuthError
     from google.cloud import bigquery
-    from google.oauth2 import service_account
+    from google.cloud.bigquery import dbapi
+    from google.cloud.exceptions import Unauthorized
 
     dependencies_installed = True
 except ImportError:
@@ -171,6 +178,12 @@ def _monkeypatch_bigquery_string_literal() -> None:
         pass
 
 
+registry.register(
+    "bigquery.extended",
+    "superset.db_engine_specs.bigquery_dialect",
+    "ExtendedQueryDialect",
+)
+
 _monkeypatch_bigquery_string_literal()
 
 
@@ -210,11 +223,17 @@ class BigQueryParametersSchema(Schema):
         required=False,
         metadata={"description": "Contents of BigQuery JSON credentials."},
     )
+    project_id = fields.String(
+        required=False,
+        metadata={"description": "Google Cloud project used for BigQuery."},
+    )
     query = fields.Dict(required=False)
 
 
-class BigQueryParametersType(TypedDict):
-    credentials_info: dict[str, Any]
+class BigQueryParametersType(TypedDict, total=False):
+    access_token: str | None
+    credentials_info: dict[str, Any] | None
+    project_id: str | None
     query: dict[str, Any]
 
 
@@ -231,6 +250,24 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
     parameters_schema = BigQueryParametersSchema()
     default_driver = "bigquery"
     sqlalchemy_uri_placeholder = "bigquery://{project_id}"
+
+    supports_oauth2 = True
+    oauth2_scope = "openid https://www.googleapis.com/auth/bigquery"
+    oauth2_token_response_scope_optional = False
+    oauth2_readonly_scope = "openid https://www.googleapis.com/auth/bigquery.readonly"
+    oauth2_authorization_request_uri = "https://accounts.google.com/o/oauth2/auth"
+    oauth2_token_request_uri = "https://oauth2.googleapis.com/token"  # noqa: S105
+    oauth2_token_request_type = "data"  # noqa: S105
+    oauth2_additional_auth_uri_query_params = {
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+        "prompt": "consent",
+    }
+    oauth2_exception: type[Exception] | tuple[type[Exception], ...]
+    if dependencies_installed:
+        oauth2_exception = (GoogleAuthError, Unauthorized)
+    else:
+        oauth2_exception = Exception
 
     metadata = {
         "description": (
@@ -603,14 +640,14 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         with cls.get_engine(
             database, catalog=table.catalog, schema=table.schema
         ) as engine:
-            client = cls._get_client(engine, database)
-            table_ref = f"{table.schema}.{table.table}"
-            if table.catalog:
-                table_ref = f"{table.catalog}.{table_ref}"
-            bq_table = client.get_table(table_ref)
+            with cls._get_client(engine, database) as client:
+                table_ref = f"{table.schema}.{table.table}"
+                if table.catalog:
+                    table_ref = f"{table.catalog}.{table_ref}"
+                bq_table = client.get_table(table_ref)
 
-            if bq_table.time_partitioning:
-                return bq_table.time_partitioning.field
+                if bq_table.time_partitioning:
+                    return bq_table.time_partitioning.field
         return None
 
     @classmethod
@@ -688,62 +725,46 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         if not table.schema:
             raise SupersetException("The table schema must be defined")
 
-        to_gbq_kwargs = {}
         with cls.get_engine(
             database,
             catalog=table.catalog,
             schema=table.schema,
         ) as engine:
-            to_gbq_kwargs = {
-                "destination_table": str(table),
-                "project_id": engine.url.host,
-            }
+            with cls._get_client(engine, database) as client:
+                to_gbq_kwargs = {
+                    "destination_table": str(table),
+                    "project_id": engine.url.host,
+                    "bigquery_client": client,
+                }
 
-        # Add credentials if they are set on the SQLAlchemy dialect.
+                # Only pass through supported kwargs.
+                supported_kwarg_keys = {"if_exists"}
 
-        if creds := engine.dialect.credentials_info:
-            to_gbq_kwargs["credentials"] = (
-                service_account.Credentials.from_service_account_info(creds)
-            )
+                for key in supported_kwarg_keys:
+                    if key in to_sql_kwargs:
+                        to_gbq_kwargs[key] = to_sql_kwargs[key]
 
-        # Only pass through supported kwargs.
-        supported_kwarg_keys = {"if_exists"}
-
-        for key in supported_kwarg_keys:
-            if key in to_sql_kwargs:
-                to_gbq_kwargs[key] = to_sql_kwargs[key]
-
-        pandas_gbq.to_gbq(df, **to_gbq_kwargs)
+                pandas_gbq.to_gbq(df, **to_gbq_kwargs)
 
     @classmethod
+    @contextmanager
     def _get_client(
         cls,
         engine: Engine,
         database: Database,  # pylint: disable=unused-argument
-    ) -> bigquery.Client:
-        """
-        Return the BigQuery client associated with an engine.
-        """
+    ) -> Iterator[bigquery.Client]:
+        """Yield the authenticated client owned by a SQLAlchemy engine."""
         if not dependencies_installed:
             raise SupersetException(
                 "Could not import libraries needed to connect to BigQuery."
             )
 
-        project: str | None = engine.url.host or None
+        if oauth_client := getattr(engine.dialect, "oauth_client", None):
+            yield oauth_client
+            return
 
-        if credentials_info := engine.dialect.credentials_info:
-            credentials = service_account.Credentials.from_service_account_info(
-                credentials_info
-            )
-            return bigquery.Client(credentials=credentials, project=project)
-
-        try:
-            credentials = google.auth.default()[0]
-            return bigquery.Client(credentials=credentials, project=project)
-        except google.auth.exceptions.DefaultCredentialsError as ex:
-            raise SupersetDBAPIConnectionError(
-                "The database credentials could not be found."
-            ) from ex
+        with closing(engine.raw_connection()) as connection:
+            yield connection.dbapi_connection._client  # pylint: disable=protected-access
 
     @classmethod
     def estimate_query_cost(  # pylint: disable=too-many-arguments
@@ -775,14 +796,14 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
             schema=schema,
             source=source,
         ) as engine:
-            client = cls._get_client(engine, database)
-            return [
-                cls.custom_estimate_statement_cost(
-                    cls.process_statement(statement, database),
-                    client,
-                )
-                for statement in parsed_script.statements
-            ]
+            with cls._get_client(engine, database) as client:
+                return [
+                    cls.custom_estimate_statement_cost(
+                        cls.process_statement(statement, database),
+                        client,
+                    )
+                    for statement in parsed_script.statements
+                ]
 
     @classmethod
     def get_default_catalog(cls, database: Database) -> str:
@@ -799,8 +820,8 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
             return project
 
         with database.get_sqla_engine() as engine:
-            client = cls._get_client(engine, database)
-            return client.project
+            with cls._get_client(engine, database) as client:
+                return client.project
 
     @classmethod
     def get_catalog_names(
@@ -813,22 +834,71 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
 
         In BigQuery, a catalog is called a "project".
         """
-        engine: Engine
-        with database.get_sqla_engine() as engine:
-            try:
-                client = cls._get_client(engine, database)
-            except SupersetDBAPIConnectionError:
-                logger.warning(
-                    "Could not connect to database to get catalogs due to missing "
-                    "credentials. This is normal in certain circustances, for example, "
-                    "doing an import."
-                )
-                # return {} here, since it will be repopulated when creds are added
-                return set()
+        try:
+            with database.get_sqla_engine() as engine:
+                with cls._get_client(engine, database) as client:
+                    projects = client.list_projects()
+                    return {project.project_id for project in projects}
+        except (SupersetDBAPIConnectionError, OAuth2RedirectError):
+            logger.warning(
+                "Could not connect to database to get catalogs due to missing "
+                "credentials or OAuth2 required. Returning default catalog."
+            )
+            default_catalog = database.get_default_catalog()
+            return {default_catalog} if default_catalog else set()
 
-            projects = client.list_projects()
+    @classmethod
+    def needs_oauth2(cls, ex: Exception) -> bool:
+        """Return whether a BigQuery error requires user OAuth2."""
+        if dependencies_installed and isinstance(ex, dbapi.exceptions.DatabaseError):
+            if ex.args and isinstance(ex.args[0], Exception):
+                ex = ex.args[0]
+        return super().needs_oauth2(ex) or isinstance(
+            ex, BigQueryOAuth2TokenRequiredError
+        )
 
-        return {project.project_id for project in projects}
+    @classmethod
+    def _has_service_account_credentials(cls, database: Database, url: URL) -> bool:
+        """Return whether explicit service-account credentials are configured."""
+        if database.get_encrypted_extra().get("credentials_info"):
+            return True
+
+        return any(
+            url.query.get(parameter)
+            for parameter in (
+                "credentials_path",
+                "credentials_info",
+                "credentials_base64",
+            )
+        )
+
+    @classmethod
+    def impersonate_user(
+        cls,
+        database: Database,
+        username: str | None,
+        user_token: str | None,
+        url: URL,
+        engine_kwargs: dict[str, Any],
+    ) -> tuple[URL, dict[str, Any]]:
+        """Configure a private extended dialect for the current user.
+
+        ``Database.get_sqla_engine`` resolves a fresh access token before calling
+        this method, refreshing the persisted OAuth token when necessary.
+        """
+        if cls._has_service_account_credentials(database, url):
+            raise SupersetException(
+                "Service account credentials and user impersonation cannot be used "
+                "together. Remove the service account JSON to use OAuth2 impersonation."
+            )
+
+        def oauth_token_provider() -> str | None:
+            return user_token
+
+        return (
+            url.set(drivername="bigquery+extended"),
+            engine_kwargs | {"oauth_token_provider": oauth_token_provider},
+        )
 
     @classmethod
     def adjust_engine_params(
@@ -874,6 +944,15 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         return None
 
     @classmethod
+    def get_oauth2_scope(cls, database: Database, scope: str) -> str:
+        if (
+            database.impersonate_user
+            and not current_app.config["BIGQUERY_IMPERSONATION_ALLOW_WRITE"]
+        ):
+            return cls.oauth2_readonly_scope
+        return scope
+
+    @classmethod
     def get_allow_cost_estimate(cls, extra: dict[str, Any]) -> bool:
         return True
 
@@ -887,7 +966,11 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         Custom version that receives a client instead of a cursor.
         """
         job_config = bigquery.QueryJobConfig(dry_run=True)
-        query_job = client.query(statement, job_config=job_config)
+        query_job = client.query(
+            statement,
+            job_config=job_config,
+            api_method=bigquery.enums.QueryApiMethod.QUERY,
+        )
 
         # Format Bytes.
         # TODO: Humanize in case more db engine specs need to be added,
@@ -930,34 +1013,46 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         query = parameters.get("query", {})
         query_params = urllib.parse.urlencode(query)
 
-        if encrypted_extra:
-            credentials_info = encrypted_extra.get("credentials_info")
-            if isinstance(credentials_info, str):
-                credentials_info = json.loads(credentials_info)
-            project_id = credentials_info.get("project_id")
-        if not encrypted_extra:
-            raise ValidationError("Missing service credentials")
+        credentials_info = (encrypted_extra or {}).get("credentials_info")
+        if isinstance(credentials_info, str):
+            credentials_info = json.loads(credentials_info)
+        credential_project_id = (
+            credentials_info.get("project_id") if credentials_info else None
+        )
+        parameter_project_id = parameters.get("project_id")
 
-        if project_id:
-            return f"{cls.default_driver}://{project_id}/?{query_params}"
+        if parameter_project_id and credential_project_id:
+            if parameter_project_id.casefold() != credential_project_id.casefold():
+                raise ValidationError(
+                    f"Service credentials project '{credential_project_id}' does not "
+                    f"match entered project '{parameter_project_id}'"
+                )
 
-        raise ValidationError("Invalid service credentials")
+        project_id = parameter_project_id or credential_project_id
+        if not project_id:
+            raise ValidationError("A BigQuery project ID is required")
+
+        return f"{cls.default_driver}://{project_id}/?{query_params}"
 
     @classmethod
     def get_parameters_from_uri(
         cls,
         uri: str,
         encrypted_extra: dict[str, Any] | None = None,
-    ) -> Any:
+    ) -> BigQueryParametersType:
         value = make_url_safe(uri)
+        project_id = value.host or value.database
 
-        # Building parameters from encrypted_extra and uri
+        parameters: BigQueryParametersType = {
+            "project_id": project_id,
+            "query": dict(value.query),
+        }
         if encrypted_extra:
-            # ``value.query`` needs to be explicitly converted into a dict (from an
-            # ``immutabledict``) so that it can be JSON serialized
-            return {**encrypted_extra, "query": dict(value.query)}
-
-        raise ValidationError("Invalid service credentials")
+            if "access_token" in encrypted_extra:
+                parameters["access_token"] = encrypted_extra["access_token"]
+            if "credentials_info" in encrypted_extra:
+                parameters["credentials_info"] = encrypted_extra["credentials_info"]
+        return parameters
 
     @classmethod
     def get_dbapi_exception_mapping(cls) -> dict[type[Exception], type[Exception]]:

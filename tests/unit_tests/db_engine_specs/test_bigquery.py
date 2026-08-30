@@ -185,8 +185,35 @@ def test_get_parameters_from_uri_serializable() -> None:
         "bigquery://dbt-tutorial-347100/",
         {"access_token": "TOP_SECRET"},
     )
-    assert parameters == {"access_token": "TOP_SECRET", "query": {}}
+    assert parameters == {
+        "access_token": "TOP_SECRET",
+        "project_id": "dbt-tutorial-347100",
+        "query": {},
+    }
     assert json.loads(json.dumps(parameters)) == parameters
+
+
+def test_build_sqlalchemy_uri_without_service_credentials() -> None:
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    assert (
+        BigQueryEngineSpec.build_sqlalchemy_uri(
+            {"project_id": "oauth-project", "query": {}}
+        )
+        == "bigquery://oauth-project/?"
+    )
+
+
+def test_build_sqlalchemy_uri_rejects_project_mismatch() -> None:
+    from marshmallow import ValidationError
+
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    with pytest.raises(ValidationError, match="does not match"):
+        BigQueryEngineSpec.build_sqlalchemy_uri(
+            {"project_id": "entered-project", "query": {}},
+            {"credentials_info": {"project_id": "credential-project"}},
+        )
 
 
 def test_unmask_encrypted_extra() -> None:
@@ -409,7 +436,7 @@ def test_get_default_catalog(mocker: MockerFixture) -> None:
 
     mocker.patch.object(Database, "get_sqla_engine")
     get_client = mocker.patch.object(BigQueryEngineSpec, "_get_client")
-    get_client().project = "project"
+    get_client().__enter__.return_value.project = "project"
 
     database = Database(
         database_name="my_db",
@@ -430,76 +457,69 @@ def test_get_default_catalog(mocker: MockerFixture) -> None:
     assert BigQueryEngineSpec.get_default_catalog(database) == "project"
 
 
-@pytest.mark.parametrize(
-    ("sqlalchemy_uri", "schema", "expected_project"),
-    [
-        ("bigquery://uri-project", None, "uri-project"),
-        ("bigquery:///uri-project", None, "uri-project"),
-        ("bigquery://", "dataset_name", None),
-    ],
-)
-def test_get_client_resolves_uri_project_with_service_account_credentials(
-    mocker: MockerFixture,
-    sqlalchemy_uri: str,
-    schema: str | None,
-    expected_project: str | None,
-) -> None:
-    """Test that service-account clients use the project from the engine URI."""
+def test_get_client_reuses_engine_client() -> None:
     from superset.db_engine_specs.bigquery import BigQueryEngineSpec
 
-    credentials_info = {"project_id": "credential-project"}
-    credentials = mock.Mock()
-    engine = mock.MagicMock()
-    engine.url = BigQueryEngineSpec.adjust_engine_params(
-        make_url(sqlalchemy_uri), {}, schema=schema
-    )[0]
-    engine.dialect.credentials_info = credentials_info
-    create_credentials = mocker.patch(
-        "superset.db_engine_specs.bigquery.service_account.Credentials."
-        "from_service_account_info",
-        return_value=credentials,
-    )
-    client = mocker.patch("superset.db_engine_specs.bigquery.bigquery.Client")
+    client = mock.Mock()
+    connection = mock.MagicMock()
+    connection.dbapi_connection._client = client
+    engine = mock.Mock()
+    engine.dialect = mock.Mock(spec=[])
+    engine.raw_connection.return_value = connection
 
-    BigQueryEngineSpec._get_client(engine, mock.Mock())
+    with BigQueryEngineSpec._get_client(engine, mock.Mock()) as actual_client:
+        assert actual_client is client
 
-    create_credentials.assert_called_once_with(credentials_info)
-    client.assert_called_once_with(credentials=credentials, project=expected_project)
+    connection.close.assert_called_once_with()
 
 
-@pytest.mark.parametrize(
-    ("sqlalchemy_uri", "schema", "expected_project"),
-    [
-        ("bigquery://uri-project", None, "uri-project"),
-        ("bigquery:///uri-project", None, "uri-project"),
-        ("bigquery://", "dataset_name", None),
-    ],
-)
-def test_get_client_resolves_uri_project_with_application_default_credentials(
-    mocker: MockerFixture,
-    sqlalchemy_uri: str,
-    schema: str | None,
-    expected_project: str | None,
-) -> None:
-    """Test that ADC clients use the project from the engine URI."""
+def test_get_client_reuses_oauth_client_without_opening_connection() -> None:
     from superset.db_engine_specs.bigquery import BigQueryEngineSpec
 
-    credentials = mock.Mock()
+    client = mock.Mock()
+    engine = mock.Mock()
+    engine.dialect.oauth_client = client
+
+    with BigQueryEngineSpec._get_client(engine, mock.Mock()) as actual_client:
+        assert actual_client is client
+
+    engine.raw_connection.assert_not_called()
+
+
+def test_df_to_sql_passes_oauth_client_to_pandas_gbq(
+    mocker: MockerFixture,
+) -> None:
+    """Impersonated uploads reuse the OAuth client from the private engine."""
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    client = mock.Mock()
     engine = mock.MagicMock()
-    engine.url = BigQueryEngineSpec.adjust_engine_params(
-        make_url(sqlalchemy_uri), {}, schema=schema
-    )[0]
-    engine.dialect.credentials_info = None
-    get_default_credentials = mocker.patch(
-        "superset.db_engine_specs.bigquery.google.auth.default",
-        return_value=(credentials, "credential-project"),
+    engine.url.host = "google-host"
+    engine.dialect.oauth_client = client
+    df = mock.Mock()
+    pandas_gbq = mocker.patch(
+        "superset.db_engine_specs.bigquery.pandas_gbq", create=True
     )
-    client = mocker.patch("superset.db_engine_specs.bigquery.bigquery.Client")
+    mocker.patch("superset.db_engine_specs.bigquery.can_upload", True)
+    mocker.patch.object(
+        BigQueryEngineSpec,
+        "get_engine",
+        return_value=mock.MagicMock(__enter__=mock.Mock(return_value=engine)),
+    )
 
-    BigQueryEngineSpec._get_client(engine, mock.Mock())
+    BigQueryEngineSpec.df_to_sql(
+        database=mock.Mock(),
+        table=Table(table="name", schema="schema"),
+        df=df,
+        to_sql_kwargs={},
+    )
 
-    get_default_credentials.assert_called_once_with()
-    client.assert_called_once_with(credentials=credentials, project=expected_project)
+    pandas_gbq.to_gbq.assert_called_once_with(
+        df,
+        project_id="google-host",
+        destination_table="schema.name",
+        bigquery_client=client,
+    )
 
 
 def test_get_time_partition_column_uses_catalog_in_table_reference(
@@ -514,7 +534,12 @@ def test_get_time_partition_column_uses_catalog_in_table_reference(
     engine = mock.MagicMock()
     get_engine = mocker.patch.object(BigQueryEngineSpec, "get_engine")
     get_engine.return_value.__enter__.return_value = engine
-    client = mocker.patch.object(BigQueryEngineSpec, "_get_client").return_value
+    client = mock.Mock()
+    mock_client_context = mocker.patch.object(
+        BigQueryEngineSpec,
+        "_get_client",
+    ).return_value
+    mock_client_context.__enter__.return_value = client
     client.get_table.return_value.time_partitioning.field = "ds"
 
     result = BigQueryEngineSpec.get_time_partition_column(
@@ -714,8 +739,12 @@ def test_get_view_names_excludes_materialized_views() -> None:
 def _patch_bq_fetch_deps(
     mocker: MockerFixture, max_mb: int = 200
 ) -> tuple[mock.MagicMock, mock.MagicMock]:
-    """Helper to patch Flask g and current_app for BigQuery fetch_data tests."""
+    """Patch Flask request globals for BigQuery fetch_data tests."""
     flask_g = mocker.patch("superset.db_engine_specs.bigquery.g")
+    mocker.patch(
+        "superset.db_engine_specs.bigquery.has_request_context",
+        return_value=True,
+    )
     app = mocker.patch("superset.db_engine_specs.bigquery.current_app")
     # Make current_app truthy and .config.get() return a plain int
     app.__bool__ = mock.Mock(return_value=True)
@@ -1101,3 +1130,188 @@ def test_monkeypatch_handles_missing_bigquery_package() -> None:
     with mock.patch("builtins.__import__", side_effect=mock_import):
         # Should not raise — the except ImportError branch handles it
         _monkeypatch_bigquery_string_literal()
+
+
+def test_extended_dialect_keeps_oauth_token_out_of_url() -> None:
+    """The extended dialect constructs OAuth credentials without URL secrets."""
+    from unittest.mock import patch
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.dialects import registry
+
+    registry.register(
+        "bigquery.test_extended",
+        "superset.db_engine_specs.bigquery_dialect",
+        "ExtendedQueryDialect",
+    )
+
+    with patch("superset.db_engine_specs.bigquery_dialect.bigquery.Client") as client:
+        client.return_value.project = "demo-project"
+        engine = create_engine(
+            "bigquery+test_extended://demo-project",
+            oauth_token_provider=lambda: "synthetic-token",
+        )
+
+        assert "synthetic-token" not in str(engine.url)
+        assert client.call_args.kwargs["credentials"].token == "synthetic-token"  # noqa: S105
+
+
+def test_needs_oauth2_when_impersonation_token_is_missing(
+    app_context: None,
+) -> None:
+    """A missing per-user token must trigger OAuth for logged-in users."""
+    from flask import g
+
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.db_engine_specs.exceptions import BigQueryOAuth2TokenRequiredError
+
+    g.user = mock.MagicMock()
+
+    assert BigQueryEngineSpec.needs_oauth2(BigQueryOAuth2TokenRequiredError())
+
+
+def test_needs_oauth2_without_user_context(app_context: None) -> None:
+    """Unsaved connection tests must classify missing impersonation tokens as OAuth."""
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.db_engine_specs.exceptions import BigQueryOAuth2TokenRequiredError
+
+    with mock.patch("superset.db_engine_specs.bigquery.dependencies_installed", False):
+        assert BigQueryEngineSpec.needs_oauth2(BigQueryOAuth2TokenRequiredError())
+
+
+def test_get_oauth2_config_uses_readonly_scope_for_impersonation(
+    mocker: MockerFixture, app_context: None
+) -> None:
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.models.core import Database
+
+    mocker.patch.dict(
+        "superset.db_engine_specs.bigquery.current_app.config",
+        {
+            "DATABASE_OAUTH2_CLIENTS": {
+                "Google BigQuery": {
+                    "id": "client-id",
+                    "secret": "client-secret",
+                    "scope": "openid https://www.googleapis.com/auth/bigquery",
+                }
+            },
+            "BIGQUERY_IMPERSONATION_ALLOW_WRITE": False,
+        },
+    )
+    database = Database(
+        database_name="bigquery",
+        sqlalchemy_uri="bigquery://demo-project",
+        impersonate_user=True,
+    )
+
+    config = database.get_oauth2_config()
+
+    assert config is not None
+    assert config["scope"] == BigQueryEngineSpec.oauth2_readonly_scope
+
+
+def test_get_oauth2_config_allows_write_scope_when_configured(
+    mocker: MockerFixture, app_context: None
+) -> None:
+    from superset.models.core import Database
+
+    configured_scope = "openid https://www.googleapis.com/auth/bigquery"
+    mocker.patch.dict(
+        "superset.db_engine_specs.bigquery.current_app.config",
+        {
+            "DATABASE_OAUTH2_CLIENTS": {
+                "Google BigQuery": {
+                    "id": "client-id",
+                    "secret": "client-secret",
+                    "scope": configured_scope,
+                }
+            },
+            "BIGQUERY_IMPERSONATION_ALLOW_WRITE": True,
+        },
+    )
+    database = Database(
+        database_name="bigquery",
+        sqlalchemy_uri="bigquery://demo-project",
+        impersonate_user=True,
+    )
+
+    config = database.get_oauth2_config()
+
+    assert config is not None
+    assert config["scope"] == configured_scope
+
+
+def test_custom_estimate_statement_cost_uses_query_api(
+    mocker: MockerFixture,
+) -> None:
+    from google.cloud import bigquery
+
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    client = mocker.MagicMock()
+    client.query.return_value.total_bytes_processed = 1024
+
+    assert BigQueryEngineSpec.custom_estimate_statement_cost("SELECT 1", client) == {
+        "KB Processed": 1.0
+    }
+    client.query.assert_called_once()
+    assert (
+        client.query.call_args.kwargs["api_method"]
+        == bigquery.enums.QueryApiMethod.QUERY
+    )
+
+
+def test_impersonate_user_selects_extended_driver() -> None:
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mock.MagicMock()
+    database.get_encrypted_extra.return_value = {}
+    url, engine_kwargs = BigQueryEngineSpec.impersonate_user(
+        database,
+        "alice",
+        "synthetic-token",
+        make_url("bigquery://demo-project"),
+        {},
+    )
+
+    assert url.drivername == "bigquery+extended"
+    assert engine_kwargs["oauth_token_provider"]() == "synthetic-token"  # noqa: S105
+    assert "synthetic-token" not in repr(engine_kwargs)
+
+
+def test_impersonate_user_rejects_service_account_credentials() -> None:
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.exceptions import SupersetException
+
+    database = mock.MagicMock()
+    database.get_encrypted_extra.return_value = {
+        "credentials_info": {"project_id": "demo-project"},
+    }
+
+    with pytest.raises(SupersetException, match="cannot be used together"):
+        BigQueryEngineSpec.impersonate_user(
+            database,
+            "alice",
+            "synthetic-token",
+            make_url("bigquery://demo-project"),
+            {},
+        )
+
+
+def test_impersonate_user_rejects_uri_service_account_credentials() -> None:
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.exceptions import SupersetException
+
+    database = mock.MagicMock()
+    database.get_encrypted_extra.return_value = {}
+
+    with pytest.raises(SupersetException, match="cannot be used together"):
+        BigQueryEngineSpec.impersonate_user(
+            database,
+            "alice",
+            "synthetic-token",
+            make_url(
+                "bigquery://demo-project?credentials_path=/tmp/service-account.json"
+            ),
+            {},
+        )

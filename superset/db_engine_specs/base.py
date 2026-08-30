@@ -80,6 +80,7 @@ from superset.sql.parse import (
 )
 from superset.superset_typing import (
     OAuth2ClientConfig,
+    OAuth2ScopeMatchingPolicy,
     OAuth2State,
     OAuth2TokenResponse,
     ResultSetColumnType,
@@ -95,6 +96,7 @@ from superset.utils.oauth2 import (
     generate_code_challenge,
     generate_code_verifier,
     get_oauth2_redirect_uri,
+    handle_oauth2_error,
 )
 
 if TYPE_CHECKING:
@@ -600,6 +602,9 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
     # the user impersonation methods to handle personal tokens.
     supports_oauth2 = False
     oauth2_scope = ""
+    # Providers may omit scope from the token response when it matches the request.
+    # Engine specs can opt out when the provider documents a scope response.
+    oauth2_token_response_scope_optional = True
     oauth2_authorization_request_uri: str | None = None  # pylint: disable=invalid-name
     oauth2_token_request_uri: str | None = None
     oauth2_token_request_type = "data"  # noqa: S105
@@ -734,9 +739,19 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
         raise OAuth2RedirectError(oauth_url, tab_id, default_redirect_uri)
 
     @classmethod
-    def get_oauth2_config(cls) -> OAuth2ClientConfig | None:
+    def get_oauth2_scope(cls, database: Database, scope: str) -> str:
+        """Return the OAuth2 scope required for a database connection."""
+        return scope
+
+    @classmethod
+    def get_oauth2_config(
+        cls, database: Database | None = None
+    ) -> OAuth2ClientConfig | None:
         """
         Build the DB engine spec level OAuth2 client config.
+
+        ``database`` is provided so engine specs can select provider-specific
+        settings based on database authentication options.
         """
         oauth2_config = app.config["DATABASE_OAUTH2_CLIENTS"]
         if cls.engine_name not in oauth2_config:
@@ -744,11 +759,23 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
 
         db_engine_spec_config = oauth2_config[cls.engine_name]
         redirect_uri = get_oauth2_redirect_uri()
+        scope_matching_policy = db_engine_spec_config.get(
+            "scope_matching_policy",
+            app.config["DATABASE_OAUTH2_SCOPE_MATCHING_POLICY"],
+        )
+        if scope_matching_policy not in {"ignore", "subset", "exact"}:
+            raise OAuth2Error(
+                "Invalid OAuth2 scope matching policy: "
+                f"{scope_matching_policy!r}"
+            )
 
         config: OAuth2ClientConfig = {
             "id": db_engine_spec_config["id"],
             "secret": db_engine_spec_config["secret"],
             "scope": db_engine_spec_config.get("scope") or cls.oauth2_scope,
+            "scope_matching_policy": cast(
+                OAuth2ScopeMatchingPolicy, scope_matching_policy
+            ),
             "redirect_uri": redirect_uri,
             "authorization_request_uri": db_engine_spec_config.get(
                 "authorization_request_uri",
@@ -797,6 +824,17 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
         return urljoin(uri, "?" + urlencode(params))
 
     @classmethod
+    def normalize_oauth2_token_response(
+        cls,
+        config: OAuth2ClientConfig,
+        response: OAuth2TokenResponse,
+    ) -> OAuth2TokenResponse:
+        """Normalize provider-specific omissions in an OAuth token response."""
+        if cls.oauth2_token_response_scope_optional and "scope" not in response:
+            return {**response, "scope": config["scope"]}
+        return response
+
+    @classmethod
     def get_oauth2_token(
         cls,
         config: OAuth2ClientConfig,
@@ -829,7 +867,7 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
             else requests.post(uri, json=req_body, timeout=timeout)
         )
         response.raise_for_status()
-        return response.json()
+        return cls.normalize_oauth2_token_response(config, response.json())
 
     @classmethod
     def get_oauth2_fresh_token(
@@ -2219,8 +2257,7 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
         try:
             cursor.execute(query)
         except Exception as ex:
-            if database.is_oauth2_enabled() and cls.needs_oauth2(ex):
-                cls.start_oauth2_dance(database)
+            handle_oauth2_error(database, ex)
             raise cls.get_dbapi_mapped_exception(ex) from ex
 
     @classmethod

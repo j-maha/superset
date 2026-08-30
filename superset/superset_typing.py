@@ -364,6 +364,9 @@ FlaskResponse: TypeAlias = (
 )
 
 
+OAuth2ScopeMatchingPolicy: TypeAlias = Literal["ignore", "subset", "exact"]
+
+
 class OAuth2ClientConfig(TypedDict):
     """
     Configuration for an OAuth2 client.
@@ -375,6 +378,9 @@ class OAuth2ClientConfig(TypedDict):
 
     # The scopes requested; this is usually a space separated list of URLs.
     scope: str
+
+    # How returned scopes are compared with requested scopes.
+    scope_matching_policy: NotRequired[OAuth2ScopeMatchingPolicy]
 
     # The URI where the user is redirected to after authorizing the client; by default
     # this points to `/api/v1/databases/oauth2/`, but it can be overridden by the admin.

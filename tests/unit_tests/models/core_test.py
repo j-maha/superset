@@ -38,7 +38,11 @@ from sqlalchemy.sql import Select
 
 from superset.connectors.sqla.models import SqlaTable, TableColumn
 from superset.errors import SupersetErrorType
-from superset.exceptions import OAuth2Error, OAuth2RedirectError
+from superset.exceptions import (
+    OAuth2Error,
+    OAuth2RedirectError,
+    OAuth2RequiresSavedDBError,
+)
 from superset.models.core import Database
 from superset.sql.parse import LimitMethod, Table
 from superset.utils import json
@@ -1079,6 +1083,7 @@ def test_get_oauth2_config(app_context: None) -> None:
         "authorization_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/authorize",
         "token_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/token-request",
         "scope": "refresh_token session:role:USERADMIN",
+        "scope_matching_policy": "ignore",
         "redirect_uri": "http://example.com/api/v1/database/oauth2/",
         "request_content_type": "data",  # Default value from BaseEngineSpec
     }
@@ -1107,6 +1112,7 @@ def test_get_oauth2_config_token_request_type_from_db_engine_specs(
         "authorization_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/authorize",
         "token_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/token-request",
         "scope": "refresh_token session:role:USERADMIN",
+        "scope_matching_policy": "ignore",
         "redirect_uri": "http://example.com/api/v1/database/oauth2/",
         "request_content_type": "json",
     }
@@ -1135,6 +1141,7 @@ def test_get_oauth2_config_custom_token_request_type_extra(app_context: None) ->
         "authorization_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/authorize",
         "token_request_uri": "https://abcd1234.snowflakecomputing.com/oauth/token-request",
         "scope": "refresh_token session:role:USERADMIN",
+        "scope_matching_policy": "ignore",
         "redirect_uri": "http://example.com/api/v1/database/oauth2/",
         "request_content_type": "json",
     }
@@ -1335,11 +1342,11 @@ def test_engine_oauth2(mocker: MockerFixture) -> None:
         side_effect=OAuth2Error("OAuth2 required"),
     )
 
-    with pytest.raises(OAuth2Error):
+    with pytest.raises(OAuth2RequiresSavedDBError):
         with database.get_sqla_engine("catalog", "schema"):
             pass
 
-    start_oauth2_dance.assert_called_with(database)
+    start_oauth2_dance.assert_not_called()
 
 
 def test_purge_oauth2_tokens(session: Session) -> None:
@@ -1358,7 +1365,13 @@ def test_purge_oauth2_tokens(session: Session) -> None:
         email="adoe@example.org",
         username="adoe",
     )
-    session.add(user)
+    user_b = User(
+        first_name="Bob",
+        last_name="Doe",
+        email="bdoe@example.org",
+        username="bdoe",
+    )
+    session.add_all([user, user_b])
     session.flush()
 
     database1 = Database(database_name="my_oauth2_db", sqlalchemy_uri="sqlite://")
@@ -1375,28 +1388,32 @@ def test_purge_oauth2_tokens(session: Session) -> None:
             refresh_token="my_refresh_token",  # noqa: S106
         ),
         DatabaseUserOAuth2Tokens(
-            user_id=user.id,
-            database_id=database2.id,
+            user_id=user_b.id,
+            database_id=database1.id,
             access_token="my_other_access_token",  # noqa: S106
             access_token_expiration=datetime(2024, 1, 1),
             refresh_token="my_other_refresh_token",  # noqa: S106
+        ),
+        DatabaseUserOAuth2Tokens(
+            user_id=user.id,
+            database_id=database2.id,
+            access_token="my_database_two_access_token",  # noqa: S106
+            access_token_expiration=datetime(2025, 1, 1),
+            refresh_token="my_database_two_refresh_token",  # noqa: S106
         ),
     ]
     session.add_all(tokens)
     session.flush()
 
-    assert len(session.query(DatabaseUserOAuth2Tokens).all()) == 2
+    assert len(session.query(DatabaseUserOAuth2Tokens).all()) == 3
 
-    token = (
+    database_one_tokens = (
         session.query(DatabaseUserOAuth2Tokens)
         .filter_by(database_id=database1.id)
-        .one()
+        .all()
     )
-    assert token.user_id == user.id
-    assert token.database_id == database1.id
-    assert token.access_token == "my_access_token"  # noqa: S105
-    assert token.access_token_expiration == datetime(2023, 1, 1)
-    assert token.refresh_token == "my_refresh_token"  # noqa: S105
+    assert {token.user_id for token in database_one_tokens} == {user.id, user_b.id}
+    assert all(token.database_id == database1.id for token in database_one_tokens)
 
     database1.purge_oauth2_tokens()
 
@@ -2085,3 +2102,23 @@ def test_prequery_listener_mutation_race_deterministic(
     assert not t_b.is_alive(), "thread B deadlocked"
 
     assert not errors, f"deterministic interleaving raised: {errors!r}"
+
+
+def test_impersonated_engines_bypass_process_cache(app_context: None) -> None:
+    """Impersonated engines are user-specific and must never be shared."""
+    from superset.models.core import _ENGINE_CACHE
+
+    _ENGINE_CACHE.clear()
+    database = Database(
+        database_name="impersonated",
+        sqlalchemy_uri="sqlite://",
+        impersonate_user=True,
+    )
+    database.id = 1
+
+    with database.get_sqla_engine() as first_engine:
+        assert _ENGINE_CACHE == {}
+    with database.get_sqla_engine() as second_engine:
+        assert _ENGINE_CACHE == {}
+
+    assert first_engine is not second_engine
